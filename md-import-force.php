@@ -12,8 +12,14 @@ if (!defined('WPINC')) {
     die;
 }
 
-// Incluir el logger
+// Incluir clases necesarias
 require_once plugin_dir_path(__FILE__) . 'includes/class-md-import-force-logger.php';
+require_once plugin_dir_path(__FILE__) . 'includes/class-md-import-force-file-processor.php';
+require_once plugin_dir_path(__FILE__) . 'includes/class-md-import-force-post-importer.php';
+require_once plugin_dir_path(__FILE__) . 'includes/class-md-import-force-taxonomy-importer.php';
+require_once plugin_dir_path(__FILE__) . 'includes/class-md-import-force-media-handler.php';
+require_once plugin_dir_path(__FILE__) . 'includes/class-md-import-force-comment-importer.php';
+require_once plugin_dir_path(__FILE__) . 'includes/class-md-import-force-progress-tracker.php';
 
 // Definir constantes
 define('MD_IMPORT_FORCE_VERSION', '1.0.0');
@@ -41,6 +47,7 @@ class MD_Import_Force {
         add_action('wp_ajax_md_import_force_preview', array($this, 'handle_preview'));
         add_action('wp_ajax_md_import_force_read_log', array($this, 'handle_read_log')); // AJAX action to read log
         add_action('wp_ajax_md_import_force_clear_log', array($this, 'handle_clear_log')); // AJAX action to clear log
+        add_action('wp_ajax_md_import_force_check_progress', array($this, 'handle_check_progress')); // AJAX action to check import progress
     }
 
     /**
@@ -85,7 +92,7 @@ class MD_Import_Force {
             'i18n' => array(
                 'uploading' => __('Subiendo archivo...', 'md-import-force'),
                 'importing' => __('Importando contenido...', 'md-import-force'),
-                'success' => __('La importación se ha realizado con exito', 'md-import-force'),
+                'success' => __('La importación se ha realizado con éxito', 'md-import-force'),
                 'error' => __('Error en la importación', 'md-import-force'),
             )
         ));
@@ -248,6 +255,33 @@ class MD_Import_Force {
             wp_send_json_error(array('message' => __('El archivo de importación no existe.', 'md-import-force')));
         }
 
+        // Configurar cabeceras para evitar el almacenamiento en búfer
+        header('Content-Type: text/html; charset=utf-8');
+        header('Cache-Control: no-cache, must-revalidate');
+        header('Pragma: no-cache');
+
+        // Iniciar buffer de salida para permitir actualizaciones de progreso
+        if (ob_get_level()) ob_end_clean();
+        ob_start();
+
+        // Desactivar el límite de tiempo de ejecución si es posible
+        if (function_exists('set_time_limit')) {
+            set_time_limit(0);
+        }
+
+        // Enviar un mensaje inicial para establecer la conexión
+        echo "\n<progress-update data-timestamp=\"" . time() . "\">" . json_encode([
+            'current' => 0,
+            'total' => 0,
+            'percent' => 0,
+            'current_item' => 'Iniciando importación...',
+            'timestamp' => microtime(true)
+        ]) . "</progress-update>\n";
+
+        // Vaciar el buffer para enviar los datos inmediatamente
+        ob_flush();
+        flush();
+
         // Cargar el manejador de importación
         require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-handler.php'; // Ruta corregida
         $importer = new MD_Import_Force_Handler(); // Clase corregida
@@ -255,10 +289,14 @@ class MD_Import_Force {
         // Realizar la importación (siempre fuerza IDs)
         $result = $importer->start_import($file_path); // Método y parámetros corregidos
 
+        // Asegurarse de que todo el buffer se ha enviado
+        ob_flush();
+        flush();
+
         // Devolver el resultado vía JSON
         if (isset($result['success']) && $result['success']) {
             wp_send_json_success(array(
-                'message' => $result['message'] ?? __('La importación se ha realizado con exito', 'md-import-force'), // Usar mensaje del resultado
+                'message' => $result['message'] ?? __('La importación se ha realizado con éxito', 'md-import-force'), // Usar mensaje del resultado
                 'stats' => $result // Devolver todas las estadísticas
             ));
         } else {
@@ -266,6 +304,45 @@ class MD_Import_Force {
                 'message' => $result['message'] ?? __('Error desconocido durante la importación.', 'md-import-force'), // Usar mensaje del resultado
             ));
         }
+    }
+
+    /**
+     * Manejar la consulta de progreso de importación
+     */
+    public function handle_check_progress() {
+        // Verificar nonce
+        check_ajax_referer('md_import_force_nonce', 'nonce');
+
+        // Verificar permisos
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('message' => __('No tienes permisos para realizar esta acción.', 'md-import-force')));
+        }
+
+        // Obtener el ID de sesión actual
+        $session_id = get_option('md_import_force_current_session', '');
+
+        if (empty($session_id)) {
+            wp_send_json_error(array('message' => __('No hay una importación en progreso.', 'md-import-force')));
+        }
+
+        // Obtener el archivo de progreso
+        $upload_dir = wp_upload_dir();
+        $temp_dir = $upload_dir['basedir'] . '/md-import-force-temp';
+        $progress_file = $temp_dir . '/' . $session_id . '_progress.json';
+
+        if (!file_exists($progress_file)) {
+            wp_send_json_error(array('message' => __('No se encontró información de progreso.', 'md-import-force')));
+        }
+
+        // Leer el archivo de progreso
+        $progress_data = json_decode(file_get_contents($progress_file), true);
+
+        if (!$progress_data) {
+            wp_send_json_error(array('message' => __('Error al leer la información de progreso.', 'md-import-force')));
+        }
+
+        // Devolver los datos de progreso
+        wp_send_json_success($progress_data);
     }
 }
 

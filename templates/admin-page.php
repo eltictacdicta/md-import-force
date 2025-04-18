@@ -46,6 +46,14 @@ if (!defined('ABSPATH')) {
                 <div id="md-import-force-preview-content"></div>
             </div>
 
+            <div id="md-import-force-current-item" class="md-import-force-current-item" style="display: none;">
+                <div class="current-item-title"><?php _e('Importando:', 'md-import-force'); ?> <span id="current-item-info">Preparando importación...</span></div>
+                <div class="progress-stats">
+                    <span id="progress-count">0</span> / <span id="progress-total">0</span>
+                    (<span id="progress-percent">0%</span>)
+                </div>
+            </div>
+
             <div id="md-import-force-progress" class="md-import-force-progress" style="display: none;">
                 <div class="progress-bar"></div>
             </div>

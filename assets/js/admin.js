@@ -1,4 +1,26 @@
 jQuery(document).ready(function($) {
+    // Add a prefilter to handle FormData objects properly and fix the settings.data.split error
+    $.ajaxPrefilter(function(options, originalOptions, jqXHR) {
+        // If data is FormData, ensure processData and contentType are set correctly
+        if (options.data instanceof FormData) {
+            options.processData = false;
+            options.contentType = false;
+        }
+
+        // Fix for the settings.data.split error
+        var oldBeforeSend = options.beforeSend;
+        options.beforeSend = function(xhr, settings) {
+            // Ensure settings.data is a string if it's not FormData
+            if (settings.data && typeof settings.data !== 'string' && !(settings.data instanceof FormData)) {
+                settings.data = $.param(settings.data);
+            }
+
+            // Call the original beforeSend if it exists
+            if (oldBeforeSend) {
+                return oldBeforeSend(xhr, settings);
+            }
+        };
+    });
 
     // Manejo de pestañas
     $('.nav-tab-wrapper a').on('click', function(e) {
@@ -95,51 +117,139 @@ jQuery(document).ready(function($) {
         $('#md-import-force-messages').html('<p>' + md_import_force.i18n.importing + '</p>'); // Usar i18n
         $('#md-import-force-progress').show(); // Mostrar progreso
 
+        // Mostrar el área de información del elemento actual
+        $('#md-import-force-current-item').show();
+        $('#current-item-info').text('Iniciando importación...');
+        $('#progress-count').text('0');
+        $('#progress-total').text('0');
+        $('#progress-percent').text('0%');
+
+        // Variable para almacenar el ID del intervalo de consulta de progreso
+        var progressCheckInterval = null;
+
+        // Función para actualizar la interfaz con los datos de progreso
+        function updateProgressUI(progressData) {
+            if (!progressData) return;
+
+            console.log('Actualización de progreso recibida:', progressData);
+
+            // Actualizar la barra de progreso
+            var percent = progressData.percent || 0;
+            $('#md-import-force-progress .progress-bar').width(percent + '%');
+
+            // Actualizar la información del elemento actual
+            if (progressData.current_item) {
+                $('#current-item-info').text(progressData.current_item);
+            }
+
+            // Actualizar los contadores
+            $('#progress-count').text(progressData.current || 0);
+            $('#progress-total').text(progressData.total || 0);
+            $('#progress-percent').text(percent + '%');
+
+            // Si la importación ha terminado, detener las consultas
+            if (progressData.status === 'completed' || percent >= 100) {
+                if (progressCheckInterval) {
+                    clearInterval(progressCheckInterval);
+                    progressCheckInterval = null;
+                }
+            }
+        }
+
+        // Función para consultar el progreso de la importación
+        function checkImportProgress() {
+            $.ajax({
+                url: md_import_force.ajax_url,
+                type: 'POST',
+                data: {
+                    action: 'md_import_force_check_progress',
+                    nonce: md_import_force.nonce
+                },
+                success: function(response) {
+                    if (response.success && response.data) {
+                        updateProgressUI(response.data);
+                    }
+                },
+                error: function(xhr, status, error) {
+                    console.error('Error al consultar progreso:', error);
+                }
+            });
+        }
+
+        // Iniciar el intervalo de consulta de progreso (cada 1 segundo)
+        progressCheckInterval = setInterval(checkImportProgress, 1000);
+
         $.ajax({
             url: md_import_force.ajax_url, // Usar ajax_url localizado
             type: 'POST',
             data: formData,
             processData: false,
             contentType: false,
-            xhr: function() {
-                var xhr = new window.XMLHttpRequest();
-                xhr.upload.addEventListener("progress", function(evt) {
-                    if (evt.lengthComputable) {
-                        var percentComplete = (evt.loaded / evt.total) * 100;
-                        $('#md-import-force-progress .progress-bar').width(percentComplete + '%');
-                    }
-                }, false);
-                return xhr;
+            cache: false, // Evitar caché
+            timeout: 0, // Sin tiempo límite
+            beforeSend: function(xhr) {
+                // Configurar cabeceras para evitar caché
+                xhr.setRequestHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+                xhr.setRequestHeader('Pragma', 'no-cache');
+                xhr.setRequestHeader('Expires', '0');
             },
             success: function(response) {
-                $('#md-import-force-progress').hide(); // Ocultar progreso
+                // Detener el intervalo de consulta de progreso
+                if (progressCheckInterval) {
+                    clearInterval(progressCheckInterval);
+                    progressCheckInterval = null;
+                }
+
+                // Limpiar la respuesta para obtener solo el JSON
+                var cleanResponse = response;
+                if (typeof response === 'string') {
+                    try {
+                        cleanResponse = JSON.parse(response);
+                    } catch (e) {
+                        console.error('Error al parsear respuesta JSON:', e);
+                        cleanResponse = { success: false, message: 'Error al procesar la respuesta del servidor' };
+                    }
+                }
+
+                // Ocultar elementos de progreso
+                $('#md-import-force-progress').hide();
+                $('#md-import-force-current-item').hide();
                 $('#md-import-force-messages').empty();
-                if (response.success) {
-                    var success_message = md_import_force.i18n.success + '. '; // Usar i18n
-                    if (response.data && response.data.stats) {
-                        success_message += 'Nuevos: ' + (response.data.stats.new_count || 0) + ', ';
-                        success_message += 'Actualizados: ' + (response.data.stats.updated_count || 0) + ', ';
-                        success_message += 'Omitidos: ' + (response.data.stats.skipped_count || 0) + '.';
-                        if (response.data.message) {
-                             success_message += '<br>' + response.data.message;
+
+                if (cleanResponse.success) {
+                    var success_message = md_import_force.i18n.success; // Usar i18n
+                    if (cleanResponse.data && cleanResponse.data.stats) {
+                        success_message += '<br>Nuevos: ' + (cleanResponse.data.stats.new_count || 0) + ', ';
+                        success_message += 'Actualizados: ' + (cleanResponse.data.stats.updated_count || 0) + ', ';
+                        success_message += 'Omitidos: ' + (cleanResponse.data.stats.skipped_count || 0) + '.';
+                        if (cleanResponse.data.message) {
+                             success_message += '<br>' + cleanResponse.data.message;
                         }
                     }
                     $('#md-import-force-messages').html('<p style="color: green;">' + success_message + '</p>');
                 } else {
-                    $('#md-import-force-messages').html('<p style="color: red;">' + md_import_force.i18n.error + ': ' + (response.data.message || 'Error desconocido') + '</p>'); // Usar i18n y acceder a data.message
+                    $('#md-import-force-messages').html('<p style="color: red;">' + md_import_force.i18n.error + ': ' + ((cleanResponse.data && cleanResponse.data.message) || 'Error desconocido') + '</p>');
                 }
             },
             error: function(xhr, status, error) {
-                $('#md-import-force-progress').hide(); // Ocultar progreso
+                // Detener el intervalo de consulta de progreso
+                if (progressCheckInterval) {
+                    clearInterval(progressCheckInterval);
+                    progressCheckInterval = null;
+                }
+
+                // Ocultar elementos de progreso
+                $('#md-import-force-progress').hide();
+                $('#md-import-force-current-item').hide();
 
                 // Verificar si la respuesta es JSON y contiene datos de importación exitosa
                 try {
-                    var jsonResponse = JSON.parse(xhr.responseText);
+                    var jsonResponse = JSON.parse(xhr.responseText.replace(/<progress-update>[\s\S]*?<\/progress-update>/g, ''));
                     if (jsonResponse && jsonResponse.success === true) {
                         // La importación fue exitosa a pesar del error AJAX
-                        var success_message = md_import_force.i18n.success + '. ';
+                        var success_message = md_import_force.i18n.success;
                         if (jsonResponse.data && jsonResponse.data.stats) {
-                            success_message += 'Nuevos: ' + (jsonResponse.data.stats.new_count || 0) + ', ';
+                            success_message += '<br>Nuevos: ' + (jsonResponse.data.stats.new_count || 0) + ', ';
                             success_message += 'Actualizados: ' + (jsonResponse.data.stats.updated_count || 0) + ', ';
                             success_message += 'Omitidos: ' + (jsonResponse.data.stats.skipped_count || 0) + '.';
                             if (jsonResponse.data.message) {
@@ -153,9 +263,10 @@ jQuery(document).ready(function($) {
                     }
                 } catch (e) {
                     // No es JSON o no se puede analizar, continuar con el manejo de error normal
+                    console.error('Error al parsear respuesta JSON en error handler:', e);
                 }
 
-                $('#md-import-force-messages').html('<p style="color: green;">' + md_import_force.i18n.success + '</p>'); // Usar i18n
+                $('#md-import-force-messages').html('<p style="color: red;">' + md_import_force.i18n.error + ': ' + error + '</p>');
             }
         });
     });
