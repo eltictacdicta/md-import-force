@@ -48,6 +48,7 @@ class MD_Import_Force {
         add_action('wp_ajax_md_import_force_read_log', array($this, 'handle_read_log')); // AJAX action to read log
         add_action('wp_ajax_md_import_force_clear_log', array($this, 'handle_clear_log')); // AJAX action to clear log
         add_action('wp_ajax_md_import_force_check_progress', array($this, 'handle_check_progress')); // AJAX action to check import progress
+        add_action('wp_ajax_md_import_force_cleanup_all', array($this, 'handle_cleanup_all')); // AJAX action to clean up all import files
     }
 
     /**
@@ -94,6 +95,8 @@ class MD_Import_Force {
                 'importing' => __('Importando contenido...', 'md-import-force'),
                 'success' => __('La importación se ha realizado con éxito', 'md-import-force'),
                 'error' => __('Error en la importación', 'md-import-force'),
+                'completed' => __('Importación completada', 'md-import-force'),
+                'processing' => __('Procesando elemento', 'md-import-force'),
             )
         ));
     }
@@ -111,9 +114,7 @@ class MD_Import_Force {
     public function handle_read_log() {
         check_ajax_referer('md_import_force_nonce', 'nonce');
 
-        require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-handler.php';
-        $handler = new MD_Import_Force_Handler();
-        $result = $handler->read_error_log();
+        $result = MD_Import_Force_Logger::read_error_log();
 
         if (is_wp_error($result)) {
             wp_send_json_error(array('message' => $result->get_error_message()));
@@ -128,9 +129,7 @@ class MD_Import_Force {
     public function handle_clear_log() {
         check_ajax_referer('md_import_force_nonce', 'nonce');
 
-        require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-handler.php';
-        $handler = new MD_Import_Force_Handler();
-        $result = $handler->clear_error_log();
+        $result = MD_Import_Force_Logger::clear_error_log();
 
         if (is_wp_error($result)) {
             wp_send_json_error(array('message' => $result->get_error_message()));
@@ -225,8 +224,12 @@ class MD_Import_Force {
 
         // Devolver el resultado vía JSON
         if (isset($result['success']) && $result['success']) {
+            // No eliminamos el archivo de previsualización aún porque se usará para la importación
             wp_send_json_success($result);
         } else {
+            // Si hay error, limpiamos el archivo de previsualización ya que no se usará
+            $handler->cleanup_import_file($target_file);
+            MD_Import_Force_Logger::log_message("MD Import Force: Limpieza de archivo de previsualización fallido: {$target_file}");
             wp_send_json_error($result['data'] ?? array('message' => __('Error desconocido durante la previsualización.', 'md-import-force')));
         }
     }
@@ -275,7 +278,8 @@ class MD_Import_Force {
             'total' => 0,
             'percent' => 0,
             'current_item' => 'Iniciando importación...',
-            'timestamp' => microtime(true)
+            'timestamp' => microtime(true),
+            'status' => 'starting'
         ]) . "</progress-update>\n";
 
         // Vaciar el buffer para enviar los datos inmediatamente
@@ -289,21 +293,78 @@ class MD_Import_Force {
         // Realizar la importación (siempre fuerza IDs)
         $result = $importer->start_import($file_path); // Método y parámetros corregidos
 
-        // Asegurarse de que todo el buffer se ha enviado
-        ob_flush();
-        flush();
+        // Registrar el resultado de la importación en el log para depuración
+        MD_Import_Force_Logger::log_message("MD Import Force: Resultado de importación: " . json_encode($result));
 
-        // Devolver el resultado vía JSON
-        if (isset($result['success']) && $result['success']) {
-            wp_send_json_success(array(
-                'message' => $result['message'] ?? __('La importación se ha realizado con éxito', 'md-import-force'), // Usar mensaje del resultado
-                'stats' => $result // Devolver todas las estadísticas
-            ));
-        } else {
-            wp_send_json_error(array(
-                'message' => $result['message'] ?? __('Error desconocido durante la importación.', 'md-import-force'), // Usar mensaje del resultado
-            ));
+        // Limpiar completamente el buffer de salida para evitar contenido no JSON
+        while (ob_get_level()) {
+            ob_end_clean();
         }
+
+        // No iniciar un nuevo buffer para evitar problemas
+        // Asegurarse de que no haya salida antes de enviar el JSON
+
+        // Limpiar el archivo de importación después de procesarlo
+        $cleanup_result = false;
+        if (isset($result['success']) && $result['success']) {
+            // Solo intentamos limpiar si la importación fue exitosa
+            $cleanup_result = $importer->cleanup_import_file($file_path);
+            MD_Import_Force_Logger::log_message("MD Import Force: Limpieza de archivo después de importación: " . ($cleanup_result ? 'Exitosa' : 'Fallida'));
+        }
+
+        // Devolver el resultado vía JSON de forma manual para evitar problemas
+        if (isset($result['success']) && $result['success']) {
+            $response = array(
+                'success' => true,
+                'data' => array(
+                    'message' => $result['message'] ?? __('La importación se ha realizado con éxito', 'md-import-force'),
+                    'stats' => $result,
+                    'cleanup' => $cleanup_result
+                )
+            );
+        } else {
+            $response = array(
+                'success' => false,
+                'data' => array(
+                    'message' => $result['message'] ?? __('Error desconocido durante la importación.', 'md-import-force')
+                )
+            );
+        }
+
+        // Enviar cabeceras JSON
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode($response);
+        exit;
+    }
+
+    /**
+     * Manejar la limpieza de todos los archivos de importación
+     */
+    public function handle_cleanup_all() {
+        // Verificar nonce
+        check_ajax_referer('md_import_force_nonce', 'nonce');
+
+        // Verificar permisos
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('message' => __('No tienes permisos para realizar esta acción.', 'md-import-force')));
+        }
+
+        // Obtener el parámetro de horas (opcional)
+        $hours = isset($_POST['hours']) ? intval($_POST['hours']) : 24;
+
+        // Cargar el manejador de importación
+        require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-handler.php';
+        $handler = new MD_Import_Force_Handler();
+
+        // Realizar la limpieza
+        $result = $handler->cleanup_all_import_files($hours);
+
+        // Devolver el resultado
+        wp_send_json_success(array(
+            'message' => sprintf(__('Limpieza completada. %d archivos eliminados, %d fallidos, %d omitidos.', 'md-import-force'),
+                        $result['deleted'], $result['failed'], $result['skipped']),
+            'stats' => $result
+        ));
     }
 
     /**
@@ -318,11 +379,45 @@ class MD_Import_Force {
             wp_send_json_error(array('message' => __('No tienes permisos para realizar esta acción.', 'md-import-force')));
         }
 
+        // Intentar obtener datos de progreso de la opción de WordPress primero
+        $progress_data = get_option('md_import_force_progress_data', null);
+        $session_id = get_option('md_import_force_current_session', '');
+
+        // Verificar que los datos de progreso sean válidos y correspondan a la sesión actual
+        if ($progress_data && !empty($session_id)) {
+            // Verificar que los datos no sean de una importación anterior completada
+            // Si es una importación nueva, el status no debe ser 'completed'
+            if ($progress_data['status'] !== 'completed' ||
+                (isset($progress_data['timestamp']) && (microtime(true) - $progress_data['timestamp']) < 60)) {
+                wp_send_json_success($progress_data);
+                return;
+            }
+        }
+
+        // Si no hay datos en la opción, intentar leer del archivo
         // Obtener el ID de sesión actual
         $session_id = get_option('md_import_force_current_session', '');
 
         if (empty($session_id)) {
-            wp_send_json_error(array('message' => __('No hay una importación en progreso.', 'md-import-force')));
+            // Intentar leer el ID de sesión del archivo
+            $upload_dir = wp_upload_dir();
+            $temp_dir = $upload_dir['basedir'] . '/md-import-force-temp';
+            $session_file = $temp_dir . '/current_session.txt';
+
+            if (file_exists($session_file)) {
+                $session_id = trim(file_get_contents($session_file));
+            }
+
+            if (empty($session_id)) {
+                wp_send_json_error(array(
+                    'message' => __('No hay una importación en progreso.', 'md-import-force'),
+                    'percent' => 0,
+                    'current' => 0,
+                    'total' => 0,
+                    'current_item' => 'Esperando inicio de importación...'
+                ));
+                return;
+            }
         }
 
         // Obtener el archivo de progreso
@@ -331,14 +426,30 @@ class MD_Import_Force {
         $progress_file = $temp_dir . '/' . $session_id . '_progress.json';
 
         if (!file_exists($progress_file)) {
-            wp_send_json_error(array('message' => __('No se encontró información de progreso.', 'md-import-force')));
+            // Si no hay archivo de progreso, devolver datos por defecto
+            wp_send_json_success(array(
+                'percent' => 0,
+                'current' => 0,
+                'total' => 0,
+                'current_item' => 'Iniciando importación...',
+                'status' => 'starting'
+            ));
+            return;
         }
 
         // Leer el archivo de progreso
         $progress_data = json_decode(file_get_contents($progress_file), true);
 
         if (!$progress_data) {
-            wp_send_json_error(array('message' => __('Error al leer la información de progreso.', 'md-import-force')));
+            // Si no se puede leer el archivo, devolver datos por defecto
+            wp_send_json_success(array(
+                'percent' => 0,
+                'current' => 0,
+                'total' => 0,
+                'current_item' => 'Preparando importación...',
+                'status' => 'preparing'
+            ));
+            return;
         }
 
         // Devolver los datos de progreso

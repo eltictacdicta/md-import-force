@@ -10,6 +10,7 @@ if (!defined('ABSPATH')) {
     <h2 class="nav-tab-wrapper">
         <a href="#" class="nav-tab nav-tab-active" data-tab="import"><?php _e('Importar', 'md-import-force'); ?></a>
         <a href="#" class="nav-tab" data-tab="log"><?php _e('Log de Errores', 'md-import-force'); ?></a>
+        <a href="#" class="nav-tab" data-tab="maintenance"><?php _e('Mantenimiento', 'md-import-force'); ?></a>
     </h2>
 
     <div class="md-import-force-container">
@@ -64,6 +65,36 @@ if (!defined('ABSPATH')) {
             <button type="button" class="button button-secondary" id="md-import-force-refresh-log"><?php _e('Actualizar Log', 'md-import-force'); ?></button>
             <button type="button" class="button button-secondary" id="md-import-force-clear-log"><?php _e('Limpiar Log', 'md-import-force'); ?></button>
             <pre id="md-import-force-log-content" style="background-color: #f1f1f1; padding: 10px; border: 1px solid #ccc; max-height: 500px; overflow-y: scroll; white-space: pre-wrap; word-wrap: break-word;"></pre>
+        </div>
+
+        <div id="tab-maintenance" class="tab-content" style="display: none;">
+            <h2><?php _e('Mantenimiento del Sistema', 'md-import-force'); ?></h2>
+            <div class="md-import-force-maintenance-section">
+                <h3><?php _e('Limpieza de Archivos de Importación', 'md-import-force'); ?></h3>
+                <p><?php _e('Elimina todos los archivos ZIP y JSON antiguos del directorio de importación.', 'md-import-force'); ?></p>
+
+                <div class="form-field">
+                    <label for="cleanup_hours"><?php _e('Eliminar archivos más antiguos que:', 'md-import-force'); ?></label>
+                    <select id="cleanup_hours" name="cleanup_hours">
+                        <option value="1"><?php _e('1 hora', 'md-import-force'); ?></option>
+                        <option value="6"><?php _e('6 horas', 'md-import-force'); ?></option>
+                        <option value="12"><?php _e('12 horas', 'md-import-force'); ?></option>
+                        <option value="24" selected><?php _e('24 horas', 'md-import-force'); ?></option>
+                        <option value="48"><?php _e('2 días', 'md-import-force'); ?></option>
+                        <option value="168"><?php _e('7 días', 'md-import-force'); ?></option>
+                        <option value="720"><?php _e('30 días', 'md-import-force'); ?></option>
+                        <option value="0"><?php _e('Todos los archivos', 'md-import-force'); ?></option>
+                    </select>
+                </div>
+
+                <div class="submit-button">
+                    <button type="button" class="button button-primary" id="md-import-force-cleanup-all">
+                        <?php _e('Limpiar Archivos', 'md-import-force'); ?>
+                    </button>
+                </div>
+
+                <div id="md-import-force-cleanup-result" class="md-import-force-messages" style="margin-top: 15px;"></div>
+            </div>
         </div>
     </div>
 </div>

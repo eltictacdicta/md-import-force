@@ -196,7 +196,7 @@ class MD_Import_Force_Handler {
                     'new_count' => $result['new_count'] ?? 0,
                     'updated_count' => $result['updated_count'] ?? 0,
                     'skipped_count' => $result['skipped_count'] ?? 0,
-                    'message' => $result['message'] ?? __('La importación se ha realizado con éxito', 'md-import-force')
+                    'message' => __('La importación se ha realizado con éxito', 'md-import-force')
                 );
             }
 
@@ -239,81 +239,87 @@ class MD_Import_Force_Handler {
         return $this->id_mapping;
     }
 
-
-
-
-
     /**
-     * Lee el contenido del log de errores del plugin.
+     * Limpia el archivo de importación después de procesarlo.
+     * Elimina el archivo ZIP o JSON para evitar residuos en el servidor.
+     *
+     * @param string $file_path Ruta al archivo que se debe eliminar
+     * @return bool True si se eliminó correctamente, False en caso contrario
      */
-    public function read_error_log() {
-        if (!current_user_can('manage_options')) {
-            return new WP_Error('permission_denied', __('No tienes permisos para ver el log.', 'md-import-force'));
+    public function cleanup_import_file($file_path) {
+        if (empty($file_path) || !file_exists($file_path)) {
+            MD_Import_Force_Logger::log_message("MD Import Force [CLEANUP]: El archivo {$file_path} no existe para limpieza.");
+            return false;
         }
 
-        // Ruta al archivo de log personalizado
-        $log_path = __DIR__ . '/../logs/md-import-force.log';
-
-        if (!file_exists($log_path)) {
-            // Loggear que el archivo no existe usando el logger personalizado
-            if (class_exists('MD_Import_Force_Logger')) {
-                MD_Import_Force_Logger::log_message(__('El archivo de log no fue encontrado en la ruta esperada: ', 'md-import-force') . $log_path);
-            }
-            return new WP_Error('log_not_found', __('El archivo de log no fue encontrado en la ruta esperada: ', 'md-import-force') . $log_path);
+        // Intentar eliminar el archivo
+        if (@unlink($file_path)) {
+            MD_Import_Force_Logger::log_message("MD Import Force [CLEANUP]: Archivo eliminado con éxito: {$file_path}");
+            return true;
+        } else {
+            MD_Import_Force_Logger::log_message("MD Import Force [CLEANUP ERROR]: No se pudo eliminar el archivo: {$file_path}");
+            return false;
         }
-
-        if (!is_readable($log_path)) {
-             if (class_exists('MD_Import_Force_Logger')) {
-                MD_Import_Force_Logger::log_message(__('No tienes permisos para leer el archivo de log en la ruta: ', 'md-import-force') . $log_path);
-            }
-            return new WP_Error('permission_denied', __('No tienes permisos para leer el archivo de log.', 'md-import-force'));
-        }
-
-        $content = file_get_contents($log_path);
-
-        return array('success' => true, 'log_content' => $content);
     }
 
     /**
-     * Limpia el contenido del log de errores del plugin.
+     * Limpia todos los archivos de importación antiguos en el directorio.
+     * Elimina archivos ZIP y JSON que tengan más de cierto tiempo de antigüedad.
+     *
+     * @param int $hours_old Eliminar archivos más antiguos que estas horas (por defecto 24 horas)
+     * @return array Resultado de la limpieza con contadores
      */
-    public function clear_error_log() {
-        if (!current_user_can('manage_options')) {
-            return new WP_Error('permission_denied', __('No tienes permisos para limpiar el log.', 'md-import-force'));
+    public function cleanup_all_import_files($hours_old = 24) {
+        $upload_dir = wp_upload_dir();
+        $target_dir = $upload_dir['basedir'] . '/md-import-force/';
+        $result = [
+            'success' => true,
+            'deleted' => 0,
+            'failed' => 0,
+            'skipped' => 0
+        ];
+
+        if (!file_exists($target_dir) || !is_dir($target_dir)) {
+            MD_Import_Force_Logger::log_message("MD Import Force [CLEANUP ALL]: El directorio {$target_dir} no existe.");
+            $result['success'] = false;
+            return $result;
         }
 
-        // Ruta al archivo de log personalizado
-        $log_path = MD_IMPORT_FORCE_PLUGIN_DIR . 'logs/md-import-force.log';
+        $time_threshold = time() - ($hours_old * 3600); // Convertir horas a segundos
+        $files = glob($target_dir . '*');
 
-        if (!file_exists($log_path)) {
-             if (class_exists('MD_Import_Force_Logger')) {
-                MD_Import_Force_Logger::log_message(__('El archivo de log no fue encontrado en la ruta esperada: ', 'md-import-force') . $log_path);
+        foreach ($files as $file) {
+            // Saltar directorios
+            if (is_dir($file)) {
+                $result['skipped']++;
+                continue;
             }
-            return new WP_Error('log_not_found', __('El archivo de log no fue encontrado en la ruta esperada: ', 'md-import-force') . $log_path);
-        }
 
-         if (!is_writable($log_path)) {
-             if (class_exists('MD_Import_Force_Logger')) {
-                MD_Import_Force_Logger::log_message(__('No tienes permisos para escribir en el archivo de log en la ruta: ', 'md-import-force') . $log_path);
+            // Verificar la extensión del archivo
+            $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
+            if ($ext !== 'zip' && $ext !== 'json') {
+                $result['skipped']++;
+                continue;
             }
-            return new WP_Error('permission_denied', __('No tienes permisos para escribir en el archivo de log.', 'md-import-force'));
-        }
 
-        if (file_put_contents($log_path, '') === false) {
-             if (class_exists('MD_Import_Force_Logger')) {
-                MD_Import_Force_Logger::log_message(__('No se pudo limpiar el archivo de log en la ruta: ', 'md-import-force') . $log_path);
+            // Verificar la antigüedad del archivo
+            $file_time = filemtime($file);
+            if ($file_time > $time_threshold) {
+                $result['skipped']++;
+                continue;
             }
-             return new WP_Error('clear_failed', __('No se pudo limpiar el archivo de log.', 'md-import-force'));
+
+            // Intentar eliminar el archivo
+            if (@unlink($file)) {
+                MD_Import_Force_Logger::log_message("MD Import Force [CLEANUP ALL]: Archivo antiguo eliminado: {$file}");
+                $result['deleted']++;
+            } else {
+                MD_Import_Force_Logger::log_message("MD Import Force [CLEANUP ALL ERROR]: No se pudo eliminar archivo antiguo: {$file}");
+                $result['failed']++;
+            }
         }
 
-        // Loggear la limpieza exitosa
-        if (class_exists('MD_Import_Force_Logger')) {
-            MD_Import_Force_Logger::log_message(__('Log de errores limpiado con éxito.', 'md-import-force'));
-        }
-
-        return array('success' => true, 'message' => __('Log de errores limpiado con éxito.', 'md-import-force'));
+        MD_Import_Force_Logger::log_message("MD Import Force [CLEANUP ALL]: Limpieza completada. Eliminados: {$result['deleted']}, Fallidos: {$result['failed']}, Omitidos: {$result['skipped']}");
+        return $result;
     }
-
-
-
 } // Fin clase

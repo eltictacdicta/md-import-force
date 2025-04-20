@@ -96,6 +96,11 @@ class MD_Import_Force_Post_Importer {
         // Enviar actualización final
         $this->progress_tracker->send_progress_update($total, $total, __('Importación completada con éxito', 'md-import-force'));
 
+        // Marcar la importación como completada
+        if (method_exists($this->progress_tracker, 'mark_as_completed')) {
+            $this->progress_tracker->mark_as_completed();
+        }
+
         $msg = sprintf(__('Posts/Páginas: %d nuevos, %d actualizados, %d omitidos.', 'md-import-force'), $imported, $updated, $skipped);
         MD_Import_Force_Logger::log_message("MD Import Force: " . $msg);
         return ['success' => true, 'new_count' => $imported, 'updated_count' => $updated, 'skipped_count' => $skipped, 'message' => $msg];
