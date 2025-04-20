@@ -86,11 +86,12 @@ class MD_Import_Force {
         }
 
         wp_enqueue_style('md-import-force-admin', MD_IMPORT_FORCE_PLUGIN_URL . 'assets/css/admin.css', array(), MD_IMPORT_FORCE_VERSION);
-        wp_enqueue_script('md-import-force-admin', MD_IMPORT_FORCE_PLUGIN_URL . 'assets/js/admin.js', array('jquery'), MD_IMPORT_FORCE_VERSION, true);
+        wp_enqueue_script('md-import-force-admin', MD_IMPORT_FORCE_PLUGIN_URL . 'assets/js/admin/index.js', array('jquery'), MD_IMPORT_FORCE_VERSION, true);
 
         wp_localize_script('md-import-force-admin', 'md_import_force', array(
             'ajax_url' => admin_url('admin-ajax.php'),
             'nonce' => wp_create_nonce('md_import_force_nonce'),
+            'plugin_url' => MD_IMPORT_FORCE_PLUGIN_URL,
             'i18n' => array(
                 'uploading' => __('Subiendo archivo...', 'md-import-force'),
                 'importing' => __('Importando contenido...', 'md-import-force'),
