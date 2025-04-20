@@ -333,7 +333,7 @@ jQuery(document).ready(function($) {
 
         // Establecer un timeout para verificar el progreso si la solicitud tarda demasiado
         var importTimeout = setTimeout(function() {
-            // Si después de 120 segundos no hay respuesta, verificar el estado actual
+            // Si después de 300 segundos (5 minutos) no hay respuesta, verificar el estado actual
             if (!importCompletedProcessed) {
                 console.log('Timeout de importación alcanzado - verificando estado actual');
 
@@ -367,24 +367,19 @@ jQuery(document).ready(function($) {
                                 console.log('Verificación final: La importación sigue en progreso', response.data);
                                 updateProgressUI(response.data);
 
-                                // Establecer un nuevo timeout más largo
-                                setTimeout(function() {
-                                    if (!importCompletedProcessed) {
-                                        console.log('Segundo timeout alcanzado - asumiendo que la importación se completó');
-                                        // Detener el intervalo de consulta de progreso
-                                        if (progressCheckInterval) {
-                                            clearInterval(progressCheckInterval);
-                                            progressCheckInterval = null;
-                                        }
-                                        // Marcar como procesado
-                                        importCompletedProcessed = true;
-                                        // Mostrar mensaje de éxito
-                                        $('#md-import-force-messages').html('<p style="color: green;">' + md_import_force.i18n.success + '</p>');
-                                        // Ocultar elementos de progreso
-                                        $('#md-import-force-progress').hide();
-                                        $('#md-import-force-current-item').hide();
-                                    }
-                                }, 60000); // 60 segundos adicionales
+                                // En lugar de asumir que la importación se completó, seguir verificando el progreso
+                                console.log('Continuando verificación de progreso en segundo plano');
+
+                                // Reiniciar el intervalo de consulta de progreso si no está activo
+                                if (!progressCheckInterval) {
+                                    progressCheckInterval = setInterval(checkImportProgress, 2000); // Consultar cada 2 segundos
+
+                                    // Realizar una consulta inmediata
+                                    checkImportProgress();
+                                }
+
+                                // Mostrar mensaje de que la importación continúa
+                                $('#md-import-force-messages').html('<p>' + md_import_force.i18n.importing + '</p>');
                             }
                         } else {
                             // Si no hay datos de progreso, asumir que la importación se completó
@@ -404,24 +399,23 @@ jQuery(document).ready(function($) {
                         }
                     },
                     error: function() {
-                        // En caso de error, asumir que la importación se completó
-                        console.log('Error en la verificación final, asumiendo que la importación se completó');
-                        // Detener el intervalo de consulta de progreso
-                        if (progressCheckInterval) {
-                            clearInterval(progressCheckInterval);
-                            progressCheckInterval = null;
+                        // En caso de error en la verificación, continuar monitoreando en lugar de asumir que se completó
+                        console.log('Error en la verificación final, continuando monitoreo de progreso');
+
+                        // Reiniciar el intervalo de consulta de progreso si no está activo
+                        if (!progressCheckInterval) {
+                            progressCheckInterval = setInterval(checkImportProgress, 2000); // Consultar cada 2 segundos
+
+                            // Realizar una consulta inmediata
+                            checkImportProgress();
                         }
-                        // Marcar como procesado
-                        importCompletedProcessed = true;
-                        // Mostrar mensaje de éxito
-                        $('#md-import-force-messages').html('<p style="color: green;">' + md_import_force.i18n.success + '</p>');
-                        // Ocultar elementos de progreso
-                        $('#md-import-force-progress').hide();
-                        $('#md-import-force-current-item').hide();
+
+                        // Mostrar mensaje de que la importación continúa
+                        $('#md-import-force-messages').html('<p>' + md_import_force.i18n.importing + '</p>');
                     }
                 });
             }
-        }, 120000); // 120 segundos (2 minutos)
+        }, 300000); // 300 segundos (5 minutos)
 
         // Realizar la solicitud de importación principal
         $.ajax({
@@ -453,17 +447,38 @@ jQuery(document).ready(function($) {
                 try {
                     // Si la respuesta ya es un objeto (jQuery la ha parseado)
                     if (typeof response === 'object') {
+                        console.log('Respuesta del servidor (objeto):', response);
                         if (response.success) {
                             var success_message = md_import_force.i18n.success; // Usar i18n
                             if (response.data && response.data.stats) {
+                                console.log('Datos de estadísticas:', response.data.stats);
                                 success_message += '<br>Nuevos: ' + (response.data.stats.new_count || 0) + ', ';
                                 success_message += 'Actualizados: ' + (response.data.stats.updated_count || 0) + ', ';
                                 success_message += 'Omitidos: ' + (response.data.stats.skipped_count || 0) + '.';
                                 if (response.data.message) {
                                     success_message += '<br>' + response.data.message;
                                 }
+
+                                // Mostrar elementos omitidos si existen
+                                console.log('Elementos omitidos (objeto):', response.data.stats.skipped_items);
+
+                                // Siempre actualizar la pestaña de elementos omitidos, incluso si parece vacío
+                                updateSkippedItemsTab(response.data.stats.skipped_items);
+
+                                // Solo mostrar el enlace si hay elementos omitidos
+                                if (response.data.stats.skipped_count > 0) {
+                                    // Añadir un enlace para ver los elementos omitidos
+                                    success_message += '<br><br><a href="#" class="button button-secondary view-skipped-items">Ver ' + response.data.stats.skipped_count + ' elementos omitidos</a>';
+                                }
                             }
                             $('#md-import-force-messages').html('<p style="color: green;">' + success_message + '</p>');
+
+                            // Añadir manejador para el botón de ver elementos omitidos
+                            $('.view-skipped-items').on('click', function(e) {
+                                e.preventDefault();
+                                // Cambiar a la pestaña de elementos omitidos
+                                $('.nav-tab-wrapper a[data-tab="skipped"]').trigger('click');
+                            });
                         } else {
                             $('#md-import-force-messages').html('<p style="color: red;">' + md_import_force.i18n.error + ': ' + ((response.data && response.data.message) || 'Error desconocido') + '</p>');
                         }
@@ -484,17 +499,38 @@ jQuery(document).ready(function($) {
                             console.log('JSON extraído:', responseText);
 
                             var jsonResponse = JSON.parse(responseText);
+                            console.log('Respuesta JSON parseada:', jsonResponse);
                             if (jsonResponse.success) {
                                 var success_message = md_import_force.i18n.success;
                                 if (jsonResponse.data && jsonResponse.data.stats) {
+                                    console.log('Datos de estadísticas (JSON):', jsonResponse.data.stats);
                                     success_message += '<br>Nuevos: ' + (jsonResponse.data.stats.new_count || 0) + ', ';
                                     success_message += 'Actualizados: ' + (jsonResponse.data.stats.updated_count || 0) + ', ';
                                     success_message += 'Omitidos: ' + (jsonResponse.data.stats.skipped_count || 0) + '.';
                                     if (jsonResponse.data.message) {
                                         success_message += '<br>' + jsonResponse.data.message;
                                     }
+
+                                    // Mostrar elementos omitidos si existen
+                                    console.log('Elementos omitidos (JSON):', jsonResponse.data.stats.skipped_items);
+
+                                    // Siempre actualizar la pestaña de elementos omitidos, incluso si parece vacío
+                                    updateSkippedItemsTab(jsonResponse.data.stats.skipped_items);
+
+                                    // Solo mostrar el enlace si hay elementos omitidos
+                                    if (jsonResponse.data.stats.skipped_count > 0) {
+                                        // Añadir un enlace para ver los elementos omitidos
+                                        success_message += '<br><br><a href="#" class="button button-secondary view-skipped-items">Ver ' + jsonResponse.data.stats.skipped_count + ' elementos omitidos</a>';
+                                    }
                                 }
                                 $('#md-import-force-messages').html('<p style="color: green;">' + success_message + '</p>');
+
+                                // Añadir manejador para el botón de ver elementos omitidos
+                                $('.view-skipped-items').on('click', function(e) {
+                                    e.preventDefault();
+                                    // Cambiar a la pestaña de elementos omitidos
+                                    $('.nav-tab-wrapper a[data-tab="skipped"]').trigger('click');
+                                });
                             } else {
                                 $('#md-import-force-messages').html('<p style="color: red;">' + md_import_force.i18n.error + ': ' + ((jsonResponse.data && jsonResponse.data.message) || 'Error desconocido') + '</p>');
                             }
@@ -623,6 +659,81 @@ jQuery(document).ready(function($) {
                 $('#md-import-force-log-content').text('Error en la solicitud AJAX para limpiar el log: ' + error);
             }
         });
+    }
+
+    // Función para actualizar la pestaña de elementos omitidos
+    function updateSkippedItemsTab(skippedItems) {
+        console.log('Actualizando pestaña de elementos omitidos:', skippedItems);
+        console.log('Tipo de skippedItems:', typeof skippedItems);
+        console.log('Es array?', Array.isArray(skippedItems));
+
+        if (!skippedItems) {
+            console.log('skippedItems es null o undefined');
+            $('#md-import-force-skipped-items').html('<p>No hay elementos omitidos para mostrar. Realiza una importación primero.</p>');
+            return;
+        }
+
+        if (Array.isArray(skippedItems) && skippedItems.length === 0) {
+            console.log('skippedItems es un array vacío');
+            $('#md-import-force-skipped-items').html('<p>No hay elementos omitidos para mostrar. Realiza una importación primero.</p>');
+            return;
+        }
+
+        // Convertir a array si es un objeto
+        if (typeof skippedItems === 'object' && !Array.isArray(skippedItems)) {
+            console.log('Convirtiendo objeto a array');
+            var tempArray = [];
+            for (var key in skippedItems) {
+                if (skippedItems.hasOwnProperty(key)) {
+                    tempArray.push(skippedItems[key]);
+                }
+            }
+            skippedItems = tempArray;
+            console.log('Después de convertir:', skippedItems);
+        }
+
+        // Si es una cadena, intentar parsearla como JSON
+        if (typeof skippedItems === 'string') {
+            try {
+                console.log('Intentando parsear string como JSON');
+                skippedItems = JSON.parse(skippedItems);
+                console.log('Después de parsear:', skippedItems);
+            } catch (e) {
+                console.error('Error al parsear skippedItems como JSON:', e);
+                $('#md-import-force-skipped-items').html('<p>Error al procesar los elementos omitidos. Ver consola para más detalles.</p>');
+                return;
+            }
+        }
+
+        // Verificar nuevamente si es un array
+        if (!Array.isArray(skippedItems)) {
+            console.error('skippedItems sigue sin ser un array después de las conversiones');
+            $('#md-import-force-skipped-items').html('<p>Error al procesar los elementos omitidos. Ver consola para más detalles.</p>');
+            return;
+        }
+
+        // Verificar si hay elementos
+        if (skippedItems.length === 0) {
+            console.log('Array de skippedItems está vacío después de las conversiones');
+            $('#md-import-force-skipped-items').html('<p>No hay elementos omitidos para mostrar. Realiza una importación primero.</p>');
+            return;
+        }
+
+        var skippedContent = '<h3>Elementos omitidos en la última importación: ' + skippedItems.length + '</h3>';
+        skippedContent += '<table class="wp-list-table widefat fixed striped">';
+        skippedContent += '<thead><tr><th>ID</th><th>Título</th><th>Tipo</th><th>Razón</th></tr></thead><tbody>';
+
+        skippedItems.forEach(function(item) {
+            skippedContent += '<tr>';
+            skippedContent += '<td>' + (item.id || 'N/A') + '</td>';
+            skippedContent += '<td>' + (item.title || 'Sin título') + '</td>';
+            skippedContent += '<td>' + (item.type || 'desconocido') + '</td>';
+            skippedContent += '<td>' + (item.reason || 'Razón desconocida') + '</td>';
+            skippedContent += '</tr>';
+        });
+
+        skippedContent += '</tbody></table>';
+        $('#md-import-force-skipped-items').html(skippedContent);
     }
 
     // Manejo del botón de limpieza de archivos

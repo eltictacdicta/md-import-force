@@ -173,5 +173,17 @@ class MD_Import_Force_Progress_Tracker {
         ];
 
         $this->save_progress_data($data);
+
+        // Enviar datos directamente al navegador si estamos en una solicitud AJAX
+        if (defined('DOING_AJAX') && DOING_AJAX) {
+            echo "\n<progress-update data-timestamp=\"" . time() . "\">" . json_encode($data) . "</progress-update>\n";
+            if (function_exists('ob_flush')) ob_flush();
+            if (function_exists('flush')) flush();
+
+            // Registrar en el log para depuración
+            if (class_exists('MD_Import_Force_Logger')) {
+                MD_Import_Force_Logger::log_message("MD Import Force: Importación marcada como completada y enviada al navegador");
+            }
+        }
     }
 }

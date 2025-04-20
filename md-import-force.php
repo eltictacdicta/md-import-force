@@ -15,6 +15,7 @@ if (!defined('WPINC')) {
 // Incluir clases necesarias
 require_once plugin_dir_path(__FILE__) . 'includes/class-md-import-force-logger.php';
 require_once plugin_dir_path(__FILE__) . 'includes/class-md-import-force-file-processor.php';
+require_once plugin_dir_path(__FILE__) . 'includes/class-md-import-force-skipped-items-tracker.php';
 require_once plugin_dir_path(__FILE__) . 'includes/class-md-import-force-post-importer.php';
 require_once plugin_dir_path(__FILE__) . 'includes/class-md-import-force-taxonomy-importer.php';
 require_once plugin_dir_path(__FILE__) . 'includes/class-md-import-force-media-handler.php';
@@ -296,6 +297,23 @@ class MD_Import_Force {
         // Registrar el resultado de la importación en el log para depuración
         MD_Import_Force_Logger::log_message("MD Import Force: Resultado de importación: " . json_encode($result));
 
+        // Asegurarse de que el progreso final se envíe al navegador
+        echo "\n<progress-update data-timestamp=\"" . time() . "\">" . json_encode([
+            'current' => 100,
+            'total' => 100,
+            'percent' => 100,
+            'current_item' => 'Importación completada',
+            'timestamp' => microtime(true),
+            'status' => 'completed'
+        ]) . "</progress-update>\n";
+
+        // Vaciar el buffer para enviar los datos inmediatamente
+        if (function_exists('ob_flush')) ob_flush();
+        if (function_exists('flush')) flush();
+
+        // Esperar un momento para asegurar que los datos se envíen
+        usleep(500000); // 0.5 segundos
+
         // Limpiar completamente el buffer de salida para evitar contenido no JSON
         while (ob_get_level()) {
             ob_end_clean();
@@ -312,16 +330,28 @@ class MD_Import_Force {
             MD_Import_Force_Logger::log_message("MD Import Force: Limpieza de archivo después de importación: " . ($cleanup_result ? 'Exitosa' : 'Fallida'));
         }
 
+        // Registrar en el log para depuración
+        MD_Import_Force_Logger::log_message("MD Import Force [DEBUG]: Resultado completo: " . json_encode($result));
+
         // Devolver el resultado vía JSON de forma manual para evitar problemas
         if (isset($result['success']) && $result['success']) {
+            // Asegurarse de que los elementos omitidos estén disponibles en la respuesta
             $response = array(
                 'success' => true,
                 'data' => array(
                     'message' => $result['message'] ?? __('La importación se ha realizado con éxito', 'md-import-force'),
-                    'stats' => $result,
+                    'stats' => array(
+                        'new_count' => $result['new_count'] ?? 0,
+                        'updated_count' => $result['updated_count'] ?? 0,
+                        'skipped_count' => $result['skipped_count'] ?? 0,
+                        'skipped_items' => $result['skipped_items'] ?? array(),
+                    ),
                     'cleanup' => $cleanup_result
                 )
             );
+
+            // Registrar en el log para depuración
+            MD_Import_Force_Logger::log_message("MD Import Force [DEBUG]: Respuesta JSON: " . json_encode($response));
         } else {
             $response = array(
                 'success' => false,

@@ -154,6 +154,9 @@ class MD_Import_Force_Handler {
                     $total_skipped += $result['skipped_count'] ?? 0;
                     if (!empty($result['message'])) $messages[] = $result['message'];
 
+                    // Guardar los elementos omitidos
+                    $skipped_items = $result['skipped_items'] ?? [];
+
                     if (function_exists('wp_cache_flush')) wp_cache_flush();
                     MD_Import_Force_Logger::log_message("MD Import Force: Procesamiento de un archivo JSON en ZIP finalizado.");
                 }
@@ -167,6 +170,7 @@ class MD_Import_Force_Handler {
                     'new_count' => $total_new,
                     'updated_count' => $total_updated,
                     'skipped_count' => $total_skipped,
+                    'skipped_items' => $skipped_items ?? [],
                     'message' => implode("\n", $messages)
                 );
 
@@ -196,6 +200,7 @@ class MD_Import_Force_Handler {
                     'new_count' => $result['new_count'] ?? 0,
                     'updated_count' => $result['updated_count'] ?? 0,
                     'skipped_count' => $result['skipped_count'] ?? 0,
+                    'skipped_items' => $result['skipped_items'] ?? [],
                     'message' => __('La importación se ha realizado con éxito', 'md-import-force')
                 );
             }
