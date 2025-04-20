@@ -9,7 +9,6 @@ if (!defined('ABSPATH')) {
 
     <h2 class="nav-tab-wrapper">
         <a href="#" class="nav-tab nav-tab-active" data-tab="import"><?php _e('Importar', 'md-import-force'); ?></a>
-        <a href="#" class="nav-tab" data-tab="skipped"><?php _e('Elementos Omitidos', 'md-import-force'); ?></a>
         <a href="#" class="nav-tab" data-tab="log"><?php _e('Log de Errores', 'md-import-force'); ?></a>
         <a href="#" class="nav-tab" data-tab="maintenance"><?php _e('Mantenimiento', 'md-import-force'); ?></a>
     </h2>
@@ -61,14 +60,7 @@ if (!defined('ABSPATH')) {
             </div>
         </div>
 
-        <div id="tab-skipped" class="tab-content" style="display: none;">
-            <h2><?php _e('Elementos Omitidos Durante la Importación', 'md-import-force'); ?></h2>
-            <p><?php _e('Aquí se mostrarán los elementos que fueron omitidos durante la última importación y la razón por la que se omitieron.', 'md-import-force'); ?></p>
 
-            <div id="md-import-force-skipped-items" class="md-import-force-skipped-items">
-                <p><?php _e('No hay elementos omitidos para mostrar. Realiza una importación primero.', 'md-import-force'); ?></p>
-            </div>
-        </div>
 
         <div id="tab-log" class="tab-content" style="display: none;">
             <h2><?php _e('Log de Errores de PHP', 'md-import-force'); ?></h2>
@@ -123,20 +115,5 @@ if (!defined('ABSPATH')) {
         border-bottom-color: #fff;
         background-color: #fff;
     }
-    .md-import-force-skipped-items table {
-        width: 100%;
-        border-collapse: collapse;
-        margin-top: 15px;
-    }
-    .md-import-force-skipped-items th, .md-import-force-skipped-items td {
-        padding: 8px;
-        text-align: left;
-        border: 1px solid #ddd;
-    }
-    .md-import-force-skipped-items th {
-        background-color: #f2f2f2;
-    }
-    .md-import-force-skipped-items tr:nth-child(even) {
-        background-color: #f9f9f9;
-    }
+
 </style>

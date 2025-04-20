@@ -459,26 +459,12 @@ jQuery(document).ready(function($) {
                                     success_message += '<br>' + response.data.message;
                                 }
 
-                                // Mostrar elementos omitidos si existen
+                                // Mostrar elementos omitidos en consola para depuración
                                 console.log('Elementos omitidos (objeto):', response.data.stats.skipped_items);
-
-                                // Siempre actualizar la pestaña de elementos omitidos, incluso si parece vacío
-                                updateSkippedItemsTab(response.data.stats.skipped_items);
-
-                                // Solo mostrar el enlace si hay elementos omitidos
-                                if (response.data.stats.skipped_count > 0) {
-                                    // Añadir un enlace para ver los elementos omitidos
-                                    success_message += '<br><br><a href="#" class="button button-secondary view-skipped-items">Ver ' + response.data.stats.skipped_count + ' elementos omitidos</a>';
-                                }
                             }
                             $('#md-import-force-messages').html('<p style="color: green;">' + success_message + '</p>');
 
-                            // Añadir manejador para el botón de ver elementos omitidos
-                            $('.view-skipped-items').on('click', function(e) {
-                                e.preventDefault();
-                                // Cambiar a la pestaña de elementos omitidos
-                                $('.nav-tab-wrapper a[data-tab="skipped"]').trigger('click');
-                            });
+
                         } else {
                             $('#md-import-force-messages').html('<p style="color: red;">' + md_import_force.i18n.error + ': ' + ((response.data && response.data.message) || 'Error desconocido') + '</p>');
                         }
@@ -511,26 +497,12 @@ jQuery(document).ready(function($) {
                                         success_message += '<br>' + jsonResponse.data.message;
                                     }
 
-                                    // Mostrar elementos omitidos si existen
+                                    // Mostrar elementos omitidos en consola para depuración
                                     console.log('Elementos omitidos (JSON):', jsonResponse.data.stats.skipped_items);
-
-                                    // Siempre actualizar la pestaña de elementos omitidos, incluso si parece vacío
-                                    updateSkippedItemsTab(jsonResponse.data.stats.skipped_items);
-
-                                    // Solo mostrar el enlace si hay elementos omitidos
-                                    if (jsonResponse.data.stats.skipped_count > 0) {
-                                        // Añadir un enlace para ver los elementos omitidos
-                                        success_message += '<br><br><a href="#" class="button button-secondary view-skipped-items">Ver ' + jsonResponse.data.stats.skipped_count + ' elementos omitidos</a>';
-                                    }
                                 }
                                 $('#md-import-force-messages').html('<p style="color: green;">' + success_message + '</p>');
 
-                                // Añadir manejador para el botón de ver elementos omitidos
-                                $('.view-skipped-items').on('click', function(e) {
-                                    e.preventDefault();
-                                    // Cambiar a la pestaña de elementos omitidos
-                                    $('.nav-tab-wrapper a[data-tab="skipped"]').trigger('click');
-                                });
+
                             } else {
                                 $('#md-import-force-messages').html('<p style="color: red;">' + md_import_force.i18n.error + ': ' + ((jsonResponse.data && jsonResponse.data.message) || 'Error desconocido') + '</p>');
                             }
@@ -661,80 +633,7 @@ jQuery(document).ready(function($) {
         });
     }
 
-    // Función para actualizar la pestaña de elementos omitidos
-    function updateSkippedItemsTab(skippedItems) {
-        console.log('Actualizando pestaña de elementos omitidos:', skippedItems);
-        console.log('Tipo de skippedItems:', typeof skippedItems);
-        console.log('Es array?', Array.isArray(skippedItems));
 
-        if (!skippedItems) {
-            console.log('skippedItems es null o undefined');
-            $('#md-import-force-skipped-items').html('<p>No hay elementos omitidos para mostrar. Realiza una importación primero.</p>');
-            return;
-        }
-
-        if (Array.isArray(skippedItems) && skippedItems.length === 0) {
-            console.log('skippedItems es un array vacío');
-            $('#md-import-force-skipped-items').html('<p>No hay elementos omitidos para mostrar. Realiza una importación primero.</p>');
-            return;
-        }
-
-        // Convertir a array si es un objeto
-        if (typeof skippedItems === 'object' && !Array.isArray(skippedItems)) {
-            console.log('Convirtiendo objeto a array');
-            var tempArray = [];
-            for (var key in skippedItems) {
-                if (skippedItems.hasOwnProperty(key)) {
-                    tempArray.push(skippedItems[key]);
-                }
-            }
-            skippedItems = tempArray;
-            console.log('Después de convertir:', skippedItems);
-        }
-
-        // Si es una cadena, intentar parsearla como JSON
-        if (typeof skippedItems === 'string') {
-            try {
-                console.log('Intentando parsear string como JSON');
-                skippedItems = JSON.parse(skippedItems);
-                console.log('Después de parsear:', skippedItems);
-            } catch (e) {
-                console.error('Error al parsear skippedItems como JSON:', e);
-                $('#md-import-force-skipped-items').html('<p>Error al procesar los elementos omitidos. Ver consola para más detalles.</p>');
-                return;
-            }
-        }
-
-        // Verificar nuevamente si es un array
-        if (!Array.isArray(skippedItems)) {
-            console.error('skippedItems sigue sin ser un array después de las conversiones');
-            $('#md-import-force-skipped-items').html('<p>Error al procesar los elementos omitidos. Ver consola para más detalles.</p>');
-            return;
-        }
-
-        // Verificar si hay elementos
-        if (skippedItems.length === 0) {
-            console.log('Array de skippedItems está vacío después de las conversiones');
-            $('#md-import-force-skipped-items').html('<p>No hay elementos omitidos para mostrar. Realiza una importación primero.</p>');
-            return;
-        }
-
-        var skippedContent = '<h3>Elementos omitidos en la última importación: ' + skippedItems.length + '</h3>';
-        skippedContent += '<table class="wp-list-table widefat fixed striped">';
-        skippedContent += '<thead><tr><th>ID</th><th>Título</th><th>Tipo</th><th>Razón</th></tr></thead><tbody>';
-
-        skippedItems.forEach(function(item) {
-            skippedContent += '<tr>';
-            skippedContent += '<td>' + (item.id || 'N/A') + '</td>';
-            skippedContent += '<td>' + (item.title || 'Sin título') + '</td>';
-            skippedContent += '<td>' + (item.type || 'desconocido') + '</td>';
-            skippedContent += '<td>' + (item.reason || 'Razón desconocida') + '</td>';
-            skippedContent += '</tr>';
-        });
-
-        skippedContent += '</tbody></table>';
-        $('#md-import-force-skipped-items').html(skippedContent);
-    }
 
     // Manejo del botón de limpieza de archivos
     $('#md-import-force-cleanup-all').on('click', function() {
