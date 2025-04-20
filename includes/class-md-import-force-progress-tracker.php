@@ -9,15 +9,35 @@ if (!defined('ABSPATH')) {
 
 class MD_Import_Force_Progress_Tracker {
 
+    /**
+     * ID único de la sesión de importación
+     */
     private $import_session_id = '';
+
+    /**
+     * Gestor de archivos
+     */
+    private $file_manager;
+
+    /**
+     * Directorio temporal
+     */
     private $temp_dir = '';
 
-    public function __construct() {
+    /**
+     * Constructor
+     *
+     * @param MD_Import_Force_File_Manager|null $file_manager Gestor de archivos opcional
+     */
+    public function __construct($file_manager = null) {
         // Generar un ID único para la sesión de importación
         $this->import_session_id = uniqid('import_');
 
-        // Crear directorio temporal si no existe
-        $this->init_temp_directory();
+        // Usar el gestor de archivos proporcionado o crear uno nuevo
+        $this->file_manager = $file_manager ?: new MD_Import_Force_File_Manager();
+
+        // Obtener el directorio temporal del gestor de archivos
+        $this->temp_dir = $this->file_manager->get_temp_dir();
 
         // Limpiar datos de progreso anteriores
         $this->clear_previous_progress_data();
@@ -28,7 +48,7 @@ class MD_Import_Force_Progress_Tracker {
         }
 
         // Guardar también en un archivo para mayor seguridad
-        $session_file = $this->temp_dir . '/current_session.txt';
+        $session_file = $this->temp_dir . 'current_session.txt';
         @file_put_contents($session_file, $this->import_session_id);
 
         // Inicializar datos de progreso con valores por defecto
@@ -37,29 +57,6 @@ class MD_Import_Force_Progress_Tracker {
         // Registrar en el log para depuración
         if (class_exists('MD_Import_Force_Logger')) {
             MD_Import_Force_Logger::log_message("MD Import Force: Iniciando seguimiento de progreso con ID: {$this->import_session_id}");
-        }
-    }
-
-    /**
-     * Inicializa el directorio temporal
-     */
-    private function init_temp_directory() {
-        // Intentar usar wp_upload_dir si está disponible
-        if (function_exists('wp_upload_dir')) {
-            $upload_dir = wp_upload_dir();
-            $this->temp_dir = $upload_dir['basedir'] . '/md-import-force-temp';
-        } else {
-            // Fallback a directorio del plugin
-            $this->temp_dir = dirname(dirname(__FILE__)) . '/temp';
-        }
-
-        // Crear directorio si no existe
-        if (!file_exists($this->temp_dir)) {
-            if (function_exists('wp_mkdir_p')) {
-                wp_mkdir_p($this->temp_dir);
-            } else {
-                @mkdir($this->temp_dir, 0755, true);
-            }
         }
     }
 
@@ -101,13 +98,8 @@ class MD_Import_Force_Progress_Tracker {
      * @param array $data Datos de progreso a guardar
      */
     private function save_progress_data($data) {
-        // Asegurarse de que el directorio temporal existe
-        if (!file_exists($this->temp_dir)) {
-            $this->init_temp_directory();
-        }
-
         // Ruta al archivo de progreso
-        $progress_file = $this->temp_dir . '/' . $this->import_session_id . '_progress.json';
+        $progress_file = $this->temp_dir . $this->import_session_id . '_progress.json';
 
         // Guardar los datos en el archivo
         @file_put_contents($progress_file, json_encode($data));
@@ -127,15 +119,8 @@ class MD_Import_Force_Progress_Tracker {
             delete_option('md_import_force_progress_data');
         }
 
-        // Intentar eliminar archivos de progreso anteriores
-        if (file_exists($this->temp_dir)) {
-            $files = glob($this->temp_dir . '/*_progress.json');
-            if (is_array($files)) {
-                foreach ($files as $file) {
-                    @unlink($file);
-                }
-            }
-        }
+        // Usar el gestor de archivos para limpiar archivos temporales
+        $this->file_manager->cleanup_temp_files();
 
         // Registrar en el log
         if (class_exists('MD_Import_Force_Logger')) {
@@ -185,5 +170,14 @@ class MD_Import_Force_Progress_Tracker {
                 MD_Import_Force_Logger::log_message("MD Import Force: Importación marcada como completada y enviada al navegador");
             }
         }
+    }
+
+    /**
+     * Obtiene el ID de la sesión de importación actual
+     *
+     * @return string ID de la sesión
+     */
+    public function get_import_session_id() {
+        return $this->import_session_id;
     }
 }
