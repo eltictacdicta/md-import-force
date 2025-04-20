@@ -34,7 +34,6 @@ class MD_Import_Force_Initializer {
 
         // Incluir clases de procesamiento
         require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-file-processor.php';
-        require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-skipped-items-tracker.php';
         require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-progress-tracker.php';
 
         // Incluir clases de importación

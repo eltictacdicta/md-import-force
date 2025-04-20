@@ -25,7 +25,7 @@ class MD_Import_Force_Ajax_Handler {
 
     /**
      * Verifica el nonce y los permisos para todas las solicitudes AJAX
-     * 
+     *
      * @param string $nonce_name Nombre del nonce a verificar
      * @return bool True si las verificaciones pasan, false en caso contrario
      */
@@ -260,16 +260,14 @@ class MD_Import_Force_Ajax_Handler {
 
         // Devolver el resultado vía JSON de forma manual para evitar problemas
         if (isset($result['success']) && $result['success']) {
-            // Asegurarse de que los elementos omitidos estén disponibles en la respuesta
             $response = array(
                 'success' => true,
                 'data' => array(
-                    'message' => $result['message'] ?? __('La importación se ha realizado con éxito', 'md-import-force'),
+                    'message' => $result['message'] ?? __('La importación se ha realizado con exito', 'md-import-force'),
                     'stats' => array(
                         'new_count' => $result['new_count'] ?? 0,
                         'updated_count' => $result['updated_count'] ?? 0,
-                        'skipped_count' => $result['skipped_count'] ?? 0,
-                        'skipped_items' => $result['skipped_items'] ?? array(),
+                        'skipped_count' => $result['skipped_count'] ?? 0
                     ),
                     'cleanup' => $cleanup_result
                 )

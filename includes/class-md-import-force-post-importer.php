@@ -7,9 +7,6 @@ if (!defined('ABSPATH')) {
     exit; // Salir si se accede directamente.
 }
 
-// Incluir el rastreador de elementos omitidos
-require_once(dirname(__FILE__) . '/class-md-import-force-skipped-items-tracker.php');
-
 class MD_Import_Force_Post_Importer {
 
     private $id_mapping = [];
@@ -18,7 +15,6 @@ class MD_Import_Force_Post_Importer {
     private $media_handler;
     private $taxonomy_importer;
     private $comment_importer;
-    private $skipped_items_tracker;
 
     public function __construct(
         $id_mapping = [],
@@ -34,7 +30,6 @@ class MD_Import_Force_Post_Importer {
         $this->media_handler = $media_handler ?: new MD_Import_Force_Media_Handler($source_site_info);
         $this->comment_importer = $comment_importer ?: new MD_Import_Force_Comment_Importer();
         $this->progress_tracker = $progress_tracker ?: new MD_Import_Force_Progress_Tracker();
-        $this->skipped_items_tracker = MD_Import_Force_Skipped_Items_Tracker::get_instance();
     }
 
     /**
@@ -67,8 +62,7 @@ class MD_Import_Force_Post_Importer {
         $imported = 0; $updated = 0; $skipped = 0; $total = count($items_data);
         MD_Import_Force_Logger::log_message("MD Import Force: Procesando {$total} posts/páginas...");
 
-        // Limpiar el rastreador de elementos omitidos antes de comenzar
-        $this->skipped_items_tracker->clear();
+        // Iniciar el proceso de importación
 
         // Enviar información de inicio para la barra de progreso
         $this->progress_tracker->send_progress_update(0, $total, null);
@@ -97,8 +91,7 @@ class MD_Import_Force_Post_Importer {
             } catch (Exception $e) {
                 MD_Import_Force_Logger::log_message("MD Import Force [ERROR] Post/Página ID {$id} ('{$title}'): " . $e->getMessage());
                 $skipped++;
-                // Registrar el elemento omitido debido a error
-                $this->skipped_items_tracker->add_skipped_item($id, $title, $type, $e->getMessage());
+                // Registrar el error en el log
             }
             if (function_exists('wp_cache_flush')) wp_cache_flush(); if (function_exists('gc_collect_cycles')) gc_collect_cycles();
 
@@ -128,18 +121,14 @@ class MD_Import_Force_Post_Importer {
         $msg = sprintf(__('Posts/Páginas: %d nuevos, %d actualizados, %d omitidos.', 'md-import-force'), $imported, $updated, $skipped);
         MD_Import_Force_Logger::log_message("MD Import Force: " . $msg);
 
-        // Obtener los elementos omitidos para incluirlos en la respuesta
-        $skipped_items = $this->skipped_items_tracker->get_skipped_items();
-
         // Registrar en el log para depuración
-        MD_Import_Force_Logger::log_message("MD Import Force [DEBUG]: Elementos omitidos para incluir en respuesta: " . json_encode($skipped_items));
+        MD_Import_Force_Logger::log_message("MD Import Force [DEBUG]: Importación finalizada con {$imported} nuevos, {$updated} actualizados, {$skipped} omitidos.");
 
         return [
             'success' => true,
             'new_count' => $imported,
             'updated_count' => $updated,
             'skipped_count' => $skipped,
-            'skipped_items' => $skipped_items,
             'message' => $msg
         ];
     }
@@ -156,14 +145,12 @@ class MD_Import_Force_Post_Importer {
         if ($type === 'oembed_cache') {
             $reason = "Tipo 'oembed_cache' omitido por configuración";
             MD_Import_Force_Logger::log_message("MD Import Force [SKIP] Post ID {$id}: {$reason}.");
-            $this->skipped_items_tracker->add_skipped_item($id, $title, $type, $reason);
             return 'skipped';
         }
 
         if ($id <= 0) {
             $reason = "ID inválido";
             MD_Import_Force_Logger::log_message("MD Import Force [SKIP] Post ID {$id}: {$reason}.");
-            $this->skipped_items_tracker->add_skipped_item($id, $title, $type, $reason);
             return 'skipped';
         }
 
@@ -197,7 +184,6 @@ class MD_Import_Force_Post_Importer {
             } else {
                 $reason = "Tipo existente '{$existing->post_type}' != Importado '{$type}'";
                 MD_Import_Force_Logger::log_message("MD Import Force [CONFLICT/SKIP] Post ID {$id}: {$reason}.");
-                $this->skipped_items_tracker->add_skipped_item($id, $title, $type, $reason);
                 return 'skipped';
             }
         } else {
@@ -215,7 +201,6 @@ class MD_Import_Force_Post_Importer {
                  else {
                      $reason = "Falló update fallback: " . $result_id->get_error_message();
                      MD_Import_Force_Logger::log_message("MD Import Force [ERROR] Post ID {$id}: {$reason}");
-                     $this->skipped_items_tracker->add_skipped_item($id, $title, $type, $reason);
                      return 'skipped';
                  }
              } elseif (is_wp_error($result_id)) throw new Exception("Error {$action} Post ID {$id}: " . $result_id->get_error_message());
@@ -226,7 +211,6 @@ class MD_Import_Force_Post_Importer {
         if ($processed_id != $id) {
             $reason = "ID procesado {$processed_id} != ID original. Omitiendo post-procesado.";
             MD_Import_Force_Logger::log_message("MD Import Force [WARN] Post ID {$id}: {$reason}");
-            $this->skipped_items_tracker->add_skipped_item($id, $title, $type, $reason);
             return 'skipped';
         }
 

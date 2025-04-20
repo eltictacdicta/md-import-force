@@ -40,19 +40,19 @@ class MD_Import_Force_Import_Manager {
     public function __construct() {
         $this->id_mapping = [];
         $this->source_site_info = [];
-        
+
         // Inicializar el rastreador de progreso
         $this->progress_tracker = new MD_Import_Force_Progress_Tracker();
-        
+
         // Inicializar el importador de taxonomías
         $this->taxonomy_importer = new MD_Import_Force_Taxonomy_Importer($this->id_mapping);
-        
+
         // Inicializar el manejador de medios
         $media_handler = new MD_Import_Force_Media_Handler($this->source_site_info);
-        
+
         // Inicializar el importador de comentarios
         $comment_importer = new MD_Import_Force_Comment_Importer();
-        
+
         // Inicializar el importador de posts
         $this->post_importer = new MD_Import_Force_Post_Importer(
             $this->id_mapping,
@@ -66,7 +66,7 @@ class MD_Import_Force_Import_Manager {
 
     /**
      * Realiza la importación de datos
-     * 
+     *
      * @param array $import_data Datos a importar
      * @return array Resultado de la importación
      */
@@ -82,7 +82,6 @@ class MD_Import_Force_Import_Manager {
             $total_updated = 0;
             $total_skipped = 0;
             $messages = [];
-            $skipped_items = [];
 
             // Si es un array (viene de un ZIP con múltiples JSONs)
             if (is_array($import_data) && isset($import_data[0])) {
@@ -97,76 +96,73 @@ class MD_Import_Force_Import_Manager {
 
                     $this->source_site_info = $single_import_data['site_info'];
                     MD_Import_Force_Logger::log_message("MD Import Force: Info sitio origen (desde ZIP): " . ($this->source_site_info['site_url'] ?? 'N/A'));
-                    
+
                     // Importar términos
                     $this->import_taxonomy_terms($single_import_data);
-                    
+
                     // Importar posts/páginas
                     $result = $this->import_post_items($single_import_data['posts'] ?? []);
-                    
+
                     $total_imported += ($result['new_count'] ?? 0) + ($result['updated_count'] ?? 0);
                     $total_new += $result['new_count'] ?? 0;
                     $total_updated += $result['updated_count'] ?? 0;
                     $total_skipped += $result['skipped_count'] ?? 0;
-                    
+
                     if (!empty($result['message'])) {
                         $messages[] = $result['message'];
                     }
-                    
-                    // Guardar los elementos omitidos
-                    if (!empty($result['skipped_items'])) {
-                        $skipped_items = array_merge($skipped_items, $result['skipped_items']);
-                    }
+
+
 
                     if (function_exists('wp_cache_flush')) {
                         wp_cache_flush();
                     }
-                    
+
                     MD_Import_Force_Logger::log_message("MD Import Force: Procesamiento de un archivo JSON en ZIP finalizado.");
                 }
-                
+
                 $final_message = sprintf(
-                    __('Importación de ZIP finalizada. Total: %d nuevos, %d actualizados, %d omitidos.', 'md-import-force'), 
-                    $total_new, 
-                    $total_updated, 
+                    __('Importación de ZIP finalizada. Total: %d nuevos, %d actualizados, %d omitidos.', 'md-import-force'),
+                    $total_new,
+                    $total_updated,
                     $total_skipped
                 );
-                
+
                 $messages[] = $final_message;
                 MD_Import_Force_Logger::log_message("MD Import Force: " . $final_message);
 
             } else { // Si es un solo conjunto de datos (viene de un JSON individual)
                 MD_Import_Force_Logger::log_message("MD Import Force: Procesando archivo JSON individual.");
-                
+
                 if (!isset($import_data['site_info']) || !isset($import_data['posts'])) {
                     throw new Exception(__('Formato JSON inválido.', 'md-import-force'));
                 }
 
                 $this->source_site_info = $import_data['site_info'];
                 MD_Import_Force_Logger::log_message("MD Import Force: Info sitio origen: " . ($this->source_site_info['site_url'] ?? 'N/A'));
-                
+
                 $this->id_mapping = array();
                 MD_Import_Force_Logger::log_message("MD Import Force: Mapeo IDs inicializado.");
 
                 // Importar términos
                 $this->import_taxonomy_terms($import_data);
-                
+
                 // Importar posts/páginas
                 $result = $this->import_post_items($import_data['posts'] ?? []);
-                
+
                 $total_imported = ($result['new_count'] ?? 0) + ($result['updated_count'] ?? 0);
                 $total_new = $result['new_count'] ?? 0;
                 $total_updated = $result['updated_count'] ?? 0;
                 $total_skipped = $result['skipped_count'] ?? 0;
-                $skipped_items = $result['skipped_items'] ?? [];
-                
-                $final_message = __('La importación se ha realizado con éxito', 'md-import-force');
+
+
+                $final_message = __('La importación se ha realizado con exito', 'md-import-force');
                 $messages[] = $final_message;
 
                 if (function_exists('wp_cache_flush')) {
                     wp_cache_flush();
                 }
-                
+
                 MD_Import_Force_Logger::log_message("MD Import Force: Importación finalizada.");
             }
 
@@ -179,7 +175,6 @@ class MD_Import_Force_Import_Manager {
                 'new_count' => $total_new,
                 'updated_count' => $total_updated,
                 'skipped_count' => $total_skipped,
-                'skipped_items' => $skipped_items,
                 'message' => implode("\n", $messages)
             );
 
@@ -191,7 +186,7 @@ class MD_Import_Force_Import_Manager {
 
     /**
      * Importa términos de taxonomías desde los datos de importación
-     * 
+     *
      * @param array $import_data Datos de importación
      */
     private function import_taxonomy_terms($import_data) {
@@ -199,18 +194,18 @@ class MD_Import_Force_Import_Manager {
         if (!empty($import_data['categories'])) {
             $this->import_terms($import_data['categories'], 'category');
         }
-        
+
         // Importar etiquetas
         if (!empty($import_data['tags'])) {
             $this->import_terms($import_data['tags'], 'post_tag');
         }
-        
+
         // Aquí se podrían importar otras taxonomías si estuvieran en $import_data['taxonomies']
     }
 
     /**
      * Importa términos de una taxonomía específica
-     * 
+     *
      * @param array $terms_data Datos de los términos
      * @param string $taxonomy Nombre de la taxonomía
      * @return array Mapeo de IDs actualizado
@@ -223,7 +218,7 @@ class MD_Import_Force_Import_Manager {
 
     /**
      * Importa posts/páginas
-     * 
+     *
      * @param array $items_data Datos de los posts/páginas
      * @return array Resultado de la importación
      */
@@ -237,7 +232,7 @@ class MD_Import_Force_Import_Manager {
 
     /**
      * Obtiene el rastreador de progreso
-     * 
+     *
      * @return MD_Import_Force_Progress_Tracker Instancia del rastreador de progreso
      */
     public function get_progress_tracker() {
