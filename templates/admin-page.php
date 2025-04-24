@@ -97,6 +97,25 @@ if (!defined('ABSPATH')) {
 
                 <div id="md-import-force-cleanup-result" class="md-import-force-messages" style="margin-top: 15px;"></div>
             </div>
+
+            <div class="md-import-force-maintenance-section" style="margin-top: 30px;">
+                <h3><?php _e('Limpieza de Schema de Rank Math', 'md-import-force'); ?></h3>
+                <p><?php _e('Elimina los metadatos de schema de Rank Math que pueden causar errores en los posts importados.', 'md-import-force'); ?></p>
+                <p><strong><?php _e('Nota:', 'md-import-force'); ?></strong> <?php _e('Esta operación eliminará todos los datos de schema de Rank Math. Después de ejecutarla, deberás configurar nuevamente el schema para tus posts si lo necesitas.', 'md-import-force'); ?></p>
+
+                <div class="form-field">
+                    <label for="schema_post_id"><?php _e('ID del Post (opcional):', 'md-import-force'); ?></label>
+                    <input type="number" id="schema_post_id" name="schema_post_id" placeholder="<?php _e('Dejar en blanco para limpiar todos los posts', 'md-import-force'); ?>">
+                </div>
+
+                <div class="submit-button">
+                    <button type="button" class="button button-primary" id="md-import-force-clean-schema">
+                        <?php _e('Limpiar Schema', 'md-import-force'); ?>
+                    </button>
+                </div>
+
+                <div id="md-import-force-schema-result" class="md-import-force-messages" style="margin-top: 15px;"></div>
+            </div>
         </div>
     </div>
 </div>

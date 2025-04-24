@@ -1,6 +1,6 @@
 /**
  * MD Import Force - Módulo Preview
- * 
+ *
  * Contiene funciones para la previsualización de archivos.
  */
 
@@ -23,8 +23,28 @@ MDImportForce.Preview = (function() {
 
         $('#md-import-force-preview-area').show();
         var preview_content = '<h4>Información del sitio de origen:</h4>';
-        preview_content += '<p>URL: ' + previewData.site_info.site_url + '</p>';
-        preview_content += '<p>Nombre: ' + previewData.site_info.site_name + '</p>';
+
+        // Mostrar URL del sitio de origen (detectada o proporcionada)
+        var sourceUrl = previewData.site_info.site_url || 'No disponible - Se detectará automáticamente durante la importación';
+        var urlClass = previewData.site_info.site_url ? '' : 'style="color: orange;"';
+        preview_content += '<p><strong>URL:</strong> <span ' + urlClass + '>' + sourceUrl + '</span></p>';
+
+        // Mostrar URL de destino
+        preview_content += '<p><strong>URL de destino:</strong> ' + previewData.target_url + '</p>';
+
+        // Mostrar nombre del sitio
+        preview_content += '<p><strong>Nombre:</strong> ' + (previewData.site_info.site_name || 'No disponible') + '</p>';
+
+        // Mostrar información sobre la sustitución de URLs
+        preview_content += '<div style="margin: 15px 0; padding: 10px; background-color: #f8f8f8; border-left: 4px solid #46b450;">';
+        preview_content += '<p><strong>Sustitución de URLs:</strong> Durante la importación, se reemplazarán automáticamente todas las URLs del sitio de origen por las URLs del sitio de destino en:</p>';
+        preview_content += '<ul style="list-style-type: disc; margin-left: 20px;">';
+        preview_content += '<li>Enlaces internos</li>';
+        preview_content += '<li>Shortcodes de WordPress</li>';
+        preview_content += '<li>Imágenes y otros medios</li>';
+        preview_content += '</ul>';
+        preview_content += '</div>';
+
         preview_content += '<h4>Primeros ' + previewData.preview_records.length + ' de ' + previewData.total_records + ' registros:</h4>';
         preview_content += '<ul>';
         previewData.preview_records.forEach(function(record) {

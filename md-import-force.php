@@ -36,6 +36,9 @@ class MD_Import_Force {
         // Inicializar el plugin
         add_action('admin_menu', array($this, 'add_admin_menu'));
         add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_scripts'));
+
+        // Inicializar el limpiador de schema
+        new MD_Import_Force_Schema_Cleaner();
     }
 
     /**

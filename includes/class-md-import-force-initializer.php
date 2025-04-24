@@ -37,6 +37,7 @@ class MD_Import_Force_Initializer {
         require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-progress-tracker.php';
 
         // Incluir clases de importación
+        require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-url-handler.php';
         require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-post-importer.php';
         require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-taxonomy-importer.php';
         require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-media-handler.php';
@@ -46,6 +47,7 @@ class MD_Import_Force_Initializer {
         require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-import-manager.php';
         require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-ajax-handler.php';
         require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-handler.php';
+        require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-schema-cleaner.php';
     }
 
     /**

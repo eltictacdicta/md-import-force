@@ -40,11 +40,6 @@ class MD_Import_Force_Post_Importer {
     private $progress_tracker;
 
     /**
-     * Registro de razones de omisión
-     */
-    private $skip_reasons = [];
-
-    /**
      * Constructor
      */
     public function __construct(
@@ -134,9 +129,7 @@ class MD_Import_Force_Post_Importer {
                     elseif ($res === 'updated') $updated++;
                     else $skipped++;
                 } catch (Exception $e) {
-                    $error_message = $e->getMessage();
-                    MD_Import_Force_Logger::log_message("MD Import Force [ERROR] Post/Página ID {$id} ('{$title}'): " . $error_message);
-                    $this->register_skip_reason($id, $title, $type, "Error: " . $error_message);
+                    MD_Import_Force_Logger::log_message("MD Import Force [ERROR] Post/Página ID {$id} ('{$title}'): " . $e->getMessage());
                     $skipped++;
                 }
 
@@ -175,11 +168,6 @@ class MD_Import_Force_Post_Importer {
 
             // Registrar en el log para depuración
             MD_Import_Force_Logger::log_message("MD Import Force [DEBUG]: Importación finalizada con {$imported} nuevos, {$updated} actualizados, {$skipped} omitidos.");
-
-            // Generar y registrar el resumen de omisiones si hay posts omitidos
-            if ($skipped > 0) {
-                $this->log_skip_summary();
-            }
 
             return [
                 'success' => true,
@@ -223,14 +211,12 @@ class MD_Import_Force_Post_Importer {
         if ($type === 'oembed_cache') {
             $reason = "Tipo 'oembed_cache' omitido por configuración";
             MD_Import_Force_Logger::log_message("MD Import Force [SKIP] Post ID {$id}: {$reason}.");
-            $this->register_skip_reason($id, $title, $type, $reason);
             return 'skipped';
         }
 
         if ($id <= 0) {
             $reason = "ID inválido";
             MD_Import_Force_Logger::log_message("MD Import Force [SKIP] Post ID {$id}: {$reason}.");
-            $this->register_skip_reason($id, $title, $type, $reason);
             return 'skipped';
         }
 
@@ -272,7 +258,6 @@ class MD_Import_Force_Post_Importer {
             } else {
                 $reason = "Tipo existente '{$existing->post_type}' != Importado '{$type}'";
                 MD_Import_Force_Logger::log_message("MD Import Force [CONFLICT/SKIP] Post ID {$id}: {$reason}.");
-                $this->register_skip_reason($id, $title, $type, $reason);
                 return 'skipped';
             }
         } else {
@@ -291,7 +276,6 @@ class MD_Import_Force_Post_Importer {
                  else {
                      $reason = "Falló update fallback: " . $result_id->get_error_message();
                      MD_Import_Force_Logger::log_message("MD Import Force [ERROR] Post ID {$id}: {$reason}");
-                     $this->register_skip_reason($id, $title, $type, $reason);
                      return 'skipped';
                  }
              } elseif (is_wp_error($result_id)) throw new Exception("Error {$action} Post ID {$id}: " . $result_id->get_error_message());
@@ -302,7 +286,6 @@ class MD_Import_Force_Post_Importer {
         if ($processed_id != $id) {
             $reason = "ID procesado {$processed_id} != ID original. Omitiendo post-procesado.";
             MD_Import_Force_Logger::log_message("MD Import Force [WARN] Post ID {$id}: {$reason}");
-            $this->register_skip_reason($id, $title, $type, $reason);
             return 'skipped';
         }
 
@@ -417,62 +400,5 @@ class MD_Import_Force_Post_Importer {
                 }
             }
         }
-    }
-
-    /**
-     * Registra una razón de omisión
-     *
-     * @param int $id ID del post
-     * @param string $title Título del post
-     * @param string $type Tipo de post
-     * @param string $reason Razón de la omisión
-     */
-    private function register_skip_reason($id, $title, $type, $reason) {
-        if (!isset($this->skip_reasons[$reason])) {
-            $this->skip_reasons[$reason] = [];
-        }
-        $this->skip_reasons[$reason][] = [
-            'id' => $id,
-            'title' => $title,
-            'type' => $type
-        ];
-    }
-
-    /**
-     * Genera y registra un resumen de las razones de omisión
-     */
-    private function log_skip_summary() {
-        if (empty($this->skip_reasons)) {
-            return;
-        }
-
-        MD_Import_Force_Logger::log_message("MD Import Force: ===== RESUMEN DE POSTS OMITIDOS =====");
-
-        foreach ($this->skip_reasons as $reason => $posts) {
-            $count = count($posts);
-            MD_Import_Force_Logger::log_message("MD Import Force: {$count} posts omitidos por: {$reason}");
-
-            // Limitar a mostrar solo los primeros 10 posts por razón para no sobrecargar el log
-            $sample = array_slice($posts, 0, 10);
-            $post_details = [];
-            foreach ($sample as $post) {
-                $post_details[] = "ID: {$post['id']}, Título: {$post['title']}, Tipo: {$post['type']}";
-            }
-
-            // Mostrar ejemplos de posts omitidos
-            if (!empty($post_details)) {
-                $examples = implode("\n", $post_details);
-                if ($count > 10) {
-                    $examples .= "\n... y " . ($count - 10) . " más";
-                }
-                MD_Import_Force_Logger::log_message("MD Import Force: Ejemplos de posts omitidos por esta razón:\n{$examples}");
-            }
-        }
-
-        // Generar un resumen en formato JSON para facilitar el análisis
-        $json_summary = json_encode($this->skip_reasons, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
-        MD_Import_Force_Logger::log_message("MD Import Force [JSON_SKIP_SUMMARY]: {$json_summary}");
-
-        MD_Import_Force_Logger::log_message("MD Import Force: ===== FIN DEL RESUMEN =====");
     }
 }

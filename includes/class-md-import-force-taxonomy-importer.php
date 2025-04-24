@@ -52,7 +52,7 @@ class MD_Import_Force_Taxonomy_Importer {
             $this->id_mapping[$old] = $new;
         }
         MD_Import_Force_Logger::log_message("MD Import Force: Importación de términos para '{$taxonomy}' completada. Términos mapeados: " . count($term_mapping));
-        
+
         return $this->id_mapping;
     }
 
@@ -90,7 +90,7 @@ class MD_Import_Force_Taxonomy_Importer {
             } else {
                 // Existe un término con este ID pero de otra taxonomía
                 MD_Import_Force_Logger::log_message("MD Import Force Terms [CONFLICT] Term ID {$id}: Ya existe un término con este ID pero de taxonomía '{$existing->taxonomy}' != '{$taxonomy}'.");
-                
+
                 // Usar el método estándar de WordPress
                 $term_arr = ['description' => $desc, 'slug' => $slug];
                 $result = wp_insert_term($name, $taxonomy, $term_arr);
@@ -174,18 +174,65 @@ class MD_Import_Force_Taxonomy_Importer {
      * Actualiza metadatos SEO para términos
      */
     private function update_term_seo_meta($term_id, $term_data) {
+        // Metadatos SEO básicos
         if (!empty($term_data['meta_title'])) {
             update_term_meta($term_id, '_yoast_wpseo_title', $term_data['meta_title']);
             update_term_meta($term_id, '_aioseo_title', $term_data['meta_title']);
+            update_term_meta($term_id, 'rank_math_title', $term_data['meta_title']);
         }
+
         if (!empty($term_data['meta_description'])) {
             update_term_meta($term_id, '_yoast_wpseo_metadesc', $term_data['meta_description']);
             update_term_meta($term_id, '_aioseo_description', $term_data['meta_description']);
+            update_term_meta($term_id, 'rank_math_description', $term_data['meta_description']);
         }
+
+        // Lista de metadatos esenciales de Rank Math (excluyendo schema)
+        $rank_math_essential_metas = array(
+            'rank_math_title',
+            'rank_math_description',
+            'rank_math_focus_keyword',
+            'rank_math_canonical_url',
+            'rank_math_robots',
+            'rank_math_og_title',
+            'rank_math_og_description',
+            'rank_math_og_image',
+            'rank_math_twitter_title',
+            'rank_math_twitter_description',
+            'rank_math_twitter_image'
+        );
+
+        // Lista de metadatos a excluir (relacionados con schema)
+        $excluded_meta_keys = array(
+            '_rank_math_schema_',
+            'rank_math_schema_',
+            'rank_math_snippet_'
+        );
+
         if (!empty($term_data['meta_data']) && is_array($term_data['meta_data'])) {
             foreach ($term_data['meta_data'] as $key => $val) {
-                if (is_array($val) && isset($val['value'])) $val = $val['value'];
-                update_term_meta($term_id, $key, $val);
+                // Verificar si es un metadato a excluir
+                $should_exclude = false;
+                foreach ($excluded_meta_keys as $excluded_prefix) {
+                    if (strpos($key, $excluded_prefix) === 0) {
+                        $should_exclude = true;
+                        break;
+                    }
+                }
+
+                // Si es un metadato de Rank Math, verificar si está en la lista de esenciales
+                if (strpos($key, 'rank_math_') === 0 && !in_array($key, $rank_math_essential_metas)) {
+                    $should_exclude = true;
+                }
+
+                // Si no debe excluirse, importar el metadato
+                if (!$should_exclude) {
+                    if (is_array($val) && isset($val['value'])) $val = $val['value'];
+                    update_term_meta($term_id, $key, $val);
+                } else {
+                    // Registrar en el log los metadatos excluidos para depuración
+                    MD_Import_Force_Logger::log_message("MD Import Force [INFO] Term ID {$term_id}: Metadato excluido: {$key}");
+                }
             }
         }
     }
@@ -193,17 +240,17 @@ class MD_Import_Force_Taxonomy_Importer {
     /**
      * Asigna categorías
      */
-    public function assign_categories($post_id, $category_ids) { 
-        $this->assign_terms($post_id, $category_ids, 'category'); 
+    public function assign_categories($post_id, $category_ids) {
+        $this->assign_terms($post_id, $category_ids, 'category');
     }
-    
+
     /**
      * Asigna etiquetas
      */
-    public function assign_tags($post_id, $tag_ids) { 
-        $this->assign_terms($post_id, $tag_ids, 'post_tag'); 
+    public function assign_tags($post_id, $tag_ids) {
+        $this->assign_terms($post_id, $tag_ids, 'post_tag');
     }
-    
+
     /**
      * Asigna términos
      */

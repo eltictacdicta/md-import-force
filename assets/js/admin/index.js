@@ -1,6 +1,6 @@
 /**
  * MD Import Force - Archivo índice
- * 
+ *
  * Este archivo carga todos los módulos necesarios en el orden correcto.
  * Debe ser incluido en lugar del antiguo admin.js.
  */
@@ -23,6 +23,7 @@ loadScript('assets/js/admin/core.js')
     .then(() => loadScript('assets/js/admin/import.js'))
     .then(() => loadScript('assets/js/admin/log.js'))
     .then(() => loadScript('assets/js/admin/cleanup.js'))
+    .then(() => loadScript('assets/js/admin/schema-cleaner.js'))
     .then(() => loadScript('assets/js/admin/main.js'))
     .catch(error => console.error('Error loading scripts:', error));
 

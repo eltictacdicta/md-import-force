@@ -96,8 +96,26 @@ class MD_Import_Force_Handler {
             $source_site_info = $data_to_preview['site_info'];
             $posts_data = $data_to_preview['posts'];
 
+            // Filtrar posts de tipo oembed_cache
+            $filtered_posts = array_filter($posts_data, function($post) {
+                return !isset($post['post_type']) || $post['post_type'] !== 'oembed_cache';
+            });
+
+            // Registrar cuántos posts se filtraron
+            $filtered_count = count($posts_data) - count($filtered_posts);
+            if ($filtered_count > 0) {
+                MD_Import_Force_Logger::log_message("MD Import Force [INFO PREVIEW]: Se filtraron {$filtered_count} posts de tipo 'oembed_cache'.");
+            }
+
+            // Usar los posts filtrados
+            $posts_data = array_values($filtered_posts);
+
             // Limitar el número de registros para la previsualización
             $preview_records = array_slice($posts_data, 0, 10); // Mostrar los primeros 10 registros
+
+            // Obtener la URL de destino real
+            $home_url = get_home_url();
+            $target_url = rtrim($home_url, '/') . '/';
 
             // Registrar éxito y devolver resultado
             MD_Import_Force_Logger::log_message("MD Import Force [DEBUG PREVIEW]: Previsualización generada con éxito.");
@@ -107,6 +125,7 @@ class MD_Import_Force_Handler {
                 'total_records' => count($posts_data),
                 'preview_records' => $preview_records,
                 'file_path' => $file_path,
+                'target_url' => $target_url,
                 'message' => __('Previsualización generada con éxito.', 'md-import-force')
             );
 

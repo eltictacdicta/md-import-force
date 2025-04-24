@@ -7,6 +7,11 @@ if (!defined('ABSPATH')) {
     exit; // Salir si se accede directamente.
 }
 
+// Incluir el manejador de URLs si no está incluido
+if (!class_exists('MD_Import_Force_URL_Handler')) {
+    require_once dirname(__FILE__) . '/class-md-import-force-url-handler.php';
+}
+
 class MD_Import_Force_Import_Manager {
 
     /**
@@ -97,6 +102,15 @@ class MD_Import_Force_Import_Manager {
                     $this->source_site_info = $single_import_data['site_info'];
                     MD_Import_Force_Logger::log_message("MD Import Force: Info sitio origen (desde ZIP): " . ($this->source_site_info['site_url'] ?? 'N/A'));
 
+                    // Detectar automáticamente la URL del sitio de origen si no está disponible
+                    if (empty($this->source_site_info['site_url'])) {
+                        $detected_url = MD_Import_Force_URL_Handler::detect_source_url($this->source_site_info, $single_import_data['posts'] ?? []);
+                        if (!empty($detected_url)) {
+                            $this->source_site_info['site_url'] = $detected_url;
+                            MD_Import_Force_Logger::log_message("MD Import Force: URL de origen detectada automáticamente: {$detected_url}");
+                        }
+                    }
+
                     // Importar términos
                     $this->import_taxonomy_terms($single_import_data);
 
@@ -143,6 +157,15 @@ class MD_Import_Force_Import_Manager {
 
                 $this->id_mapping = array();
                 MD_Import_Force_Logger::log_message("MD Import Force: Mapeo IDs inicializado.");
+
+                // Detectar automáticamente la URL del sitio de origen si no está disponible
+                if (empty($this->source_site_info['site_url'])) {
+                    $detected_url = MD_Import_Force_URL_Handler::detect_source_url($this->source_site_info, $import_data['posts'] ?? []);
+                    if (!empty($detected_url)) {
+                        $this->source_site_info['site_url'] = $detected_url;
+                        MD_Import_Force_Logger::log_message("MD Import Force: URL de origen detectada automáticamente: {$detected_url}");
+                    }
+                }
 
                 // Importar términos
                 $this->import_taxonomy_terms($import_data);

@@ -23,7 +23,7 @@ class MD_Import_Force_Media_Handler {
         $this->source_site_info = $source_site_info;
 
         // Obtener la URL completa del sitio actual directamente de la opción de WordPress
-        $home_url = get_home_url() ;
+        $home_url = get_option('home');
         if (empty($home_url)) {
             $home_url = get_option('siteurl');
         }

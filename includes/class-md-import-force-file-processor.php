@@ -51,6 +51,20 @@ class MD_Import_Force_File_Processor {
                             if (json_last_error() === JSON_ERROR_NONE) {
                                 // Si tiene site_info y posts, es un archivo válido completo
                                 if (isset($data['site_info']) && isset($data['posts'])) {
+                                    // Filtrar posts de tipo oembed_cache
+                                    $filtered_posts = array_filter($data['posts'], function($post) {
+                                        return !isset($post['post_type']) || $post['post_type'] !== 'oembed_cache';
+                                    });
+
+                                    // Registrar cuántos posts se filtraron
+                                    $filtered_count = count($data['posts']) - count($filtered_posts);
+                                    if ($filtered_count > 0) {
+                                        MD_Import_Force_Logger::log_message("MD Import Force [INFO]: Se filtraron {$filtered_count} posts de tipo 'oembed_cache' del archivo {$name}.");
+                                    }
+
+                                    // Reindexar el array para evitar índices no secuenciales
+                                    $data['posts'] = array_values($filtered_posts);
+
                                     $import_data_array[] = $data;
                                 }
                             }
@@ -109,8 +123,22 @@ class MD_Import_Force_File_Processor {
                             }
                         }
 
-                        // Si tenemos posts, añadir el conjunto combinado
+                        // Si tenemos posts, filtrar los de tipo oembed_cache y añadir el conjunto combinado
                         if (!empty($combined_data['posts'])) {
+                            // Filtrar posts de tipo oembed_cache
+                            $filtered_posts = array_filter($combined_data['posts'], function($post) {
+                                return !isset($post['post_type']) || $post['post_type'] !== 'oembed_cache';
+                            });
+
+                            // Registrar cuántos posts se filtraron
+                            $filtered_count = count($combined_data['posts']) - count($filtered_posts);
+                            if ($filtered_count > 0) {
+                                MD_Import_Force_Logger::log_message("MD Import Force [INFO]: Se filtraron {$filtered_count} posts de tipo 'oembed_cache'.");
+                            }
+
+                            // Reindexar el array para evitar índices no secuenciales
+                            $combined_data['posts'] = array_values($filtered_posts);
+
                             $import_data_array[] = $combined_data;
                             MD_Import_Force_Logger::log_message("MD Import Force [INFO]: Datos combinados con éxito. Total posts: " . count($combined_data['posts']));
                         }
@@ -132,6 +160,24 @@ class MD_Import_Force_File_Processor {
             if (empty($json_content)) throw new Exception(__('Contenido JSON vacío.', 'md-import-force'));
             $data = json_decode($json_content, true);
             if (json_last_error() !== JSON_ERROR_NONE) throw new Exception(__('Error JSON: ', 'md-import-force') . json_last_error_msg());
+
+            // Filtrar posts de tipo oembed_cache si existen
+            if (isset($data['posts']) && is_array($data['posts'])) {
+                // Filtrar posts de tipo oembed_cache
+                $filtered_posts = array_filter($data['posts'], function($post) {
+                    return !isset($post['post_type']) || $post['post_type'] !== 'oembed_cache';
+                });
+
+                // Registrar cuántos posts se filtraron
+                $filtered_count = count($data['posts']) - count($filtered_posts);
+                if ($filtered_count > 0) {
+                    MD_Import_Force_Logger::log_message("MD Import Force [INFO]: Se filtraron {$filtered_count} posts de tipo 'oembed_cache' del archivo JSON.");
+                }
+
+                // Reindexar el array para evitar índices no secuenciales
+                $data['posts'] = array_values($filtered_posts);
+            }
+
             return $data;
         } else {
             throw new Exception(__('Formato no soportado (.json o .zip).', 'md-import-force'));
