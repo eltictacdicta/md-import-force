@@ -1,0 +1,34 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Maintenance and Cleanup Tools
+
+The plugin includes tools for maintenance and cleanup of imported content.
+
+## Schema Cleaning
+
+Schema cleaning functionality is implemented in [class-md-import-force-schema-cleaner.php](mdc:includes/class-md-import-force-schema-cleaner.php) and provides:
+- Removal of problematic Rank Math schema data
+- Cleanup of schema metadata from specific posts or all posts
+
+The frontend interface for schema cleaning is handled by [schema-cleaner.js](mdc:assets/js/admin/schema-cleaner.js).
+
+## File Cleanup
+
+File cleanup functionality:
+- Implemented in [class-md-import-force-file-manager.php](mdc:includes/class-md-import-force-file-manager.php)
+- Removes old import files based on age
+- Frontend interface in [cleanup.js](mdc:assets/js/admin/cleanup.js)
+
+## Logging
+
+The logging system:
+- Logs errors and import activity to [logs/md-import-force.log](mdc:logs/md-import-force.log)
+- Implementation in [class-md-import-force-logger.php](mdc:includes/class-md-import-force-logger.php)
+- Viewable through the Log tab in the admin interface
+
+## Admin Interface
+
+The maintenance interface is accessible through the Maintenance tab in [admin-page.php](mdc:templates/admin-page.php).

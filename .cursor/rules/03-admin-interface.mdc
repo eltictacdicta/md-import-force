@@ -1,0 +1,32 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Admin Interface Structure
+
+The plugin's admin interface is divided into tabs and managed by JavaScript modules.
+
+## Main Template
+
+The admin interface is defined in [admin-page.php](mdc:templates/admin-page.php) with these key sections:
+- Import tab for uploading and processing files
+- Log tab for viewing error logs
+- Maintenance tab for cleanup operations
+
+## JavaScript Components
+
+JavaScript functionality is organized in modular files, loaded in sequence by [index.js](mdc:assets/js/admin/index.js):
+
+### Core JavaScript Files
+
+- [core.js](mdc:assets/js/admin/core.js) - Core utility functions
+- [ui.js](mdc:assets/js/admin/ui.js) - Interface handling
+- [ajax.js](mdc:assets/js/admin/ajax.js) - AJAX communication
+- [tabs.js](mdc:assets/js/admin/tabs.js) - Tab navigation
+- [preview.js](mdc:assets/js/admin/preview.js) - File preview functionality
+- [import.js](mdc:assets/js/admin/import.js) - Import process management
+- [log.js](mdc:assets/js/admin/log.js) - Log display handling
+- [cleanup.js](mdc:assets/js/admin/cleanup.js) - Cleanup operations
+- [schema-cleaner.js](mdc:assets/js/admin/schema-cleaner.js) - Schema cleaning functionality
+- [main.js](mdc:assets/js/admin/main.js) - Final initialization

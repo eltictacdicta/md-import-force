@@ -1,0 +1,23 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# MD Import Force - Project Overview
+
+This WordPress plugin allows for importing content with specific IDs. The main entry point is [md-import-force.php](mdc:md-import-force.php), which initializes the plugin.
+
+## Main File Structure
+
+- [md-import-force.php](mdc:md-import-force.php) - Main plugin file with plugin definitions and initialization
+- [includes/](mdc:includes) - Core PHP classes for plugin functionality
+- [templates/](mdc:templates) - Admin interface templates
+- [assets/](mdc:assets) - JavaScript and CSS files
+- [logs/](mdc:logs) - Error and activity logs
+
+## Key Components
+
+- Plugin Initialization: [class-md-import-force-initializer.php](mdc:includes/class-md-import-force-initializer.php)
+- Admin Interface: [admin-page.php](mdc:templates/admin-page.php)
+- JavaScript Core: [index.js](mdc:assets/js/admin/index.js) loads all client-side modules
+

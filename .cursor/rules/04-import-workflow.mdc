@@ -1,0 +1,38 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Import Workflow
+
+The import process follows a specific workflow implemented across several classes:
+
+## Import Process Flow
+
+1. File Handling:
+   - File upload via AJAX: [class-md-import-force-ajax-handler.php](mdc:includes/class-md-import-force-ajax-handler.php)
+   - File processing: [class-md-import-force-file-processor.php](mdc:includes/class-md-import-force-file-processor.php)
+
+2. Content Import:
+   - Import coordination: [class-md-import-force-import-manager.php](mdc:includes/class-md-import-force-import-manager.php)
+   - Progress tracking: [class-md-import-force-progress-tracker.php](mdc:includes/class-md-import-force-progress-tracker.php)
+
+3. Specific Content Importers:
+   - Posts: [class-md-import-force-post-importer.php](mdc:includes/class-md-import-force-post-importer.php)
+   - Taxonomies: [class-md-import-force-taxonomy-importer.php](mdc:includes/class-md-import-force-taxonomy-importer.php)
+   - Media: [class-md-import-force-media-handler.php](mdc:includes/class-md-import-force-media-handler.php)
+   - Comments: [class-md-import-force-comment-importer.php](mdc:includes/class-md-import-force-comment-importer.php)
+
+4. URL Management:
+   - URL Handling: [class-md-import-force-url-handler.php](mdc:includes/class-md-import-force-url-handler.php)
+   
+5. Logging and Error Handling:
+   - Error tracking: [class-md-import-force-error-handler.php](mdc:includes/class-md-import-force-error-handler.php)
+   - Log management: [class-md-import-force-logger.php](mdc:includes/class-md-import-force-logger.php)
+
+## Frontend Implementation
+
+The client-side import process is managed by [import.js](mdc:assets/js/admin/import.js), which handles:
+- AJAX requests during import
+- Progress updates
+- Error reporting

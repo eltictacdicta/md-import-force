@@ -1,0 +1,35 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Plugin Architecture
+
+The MD Import Force plugin follows an object-oriented architecture with several key components:
+
+## Initialization Flow
+
+1. Main plugin file: [md-import-force.php](mdc:md-import-force.php)
+2. Plugin initializer: [class-md-import-force-initializer.php](mdc:includes/class-md-import-force-initializer.php)
+
+## Core Components
+
+### Handlers
+- AJAX Handler: [class-md-import-force-ajax-handler.php](mdc:includes/class-md-import-force-ajax-handler.php)
+- Media Handler: [class-md-import-force-media-handler.php](mdc:includes/class-md-import-force-media-handler.php)
+- URL Handler: [class-md-import-force-url-handler.php](mdc:includes/class-md-import-force-url-handler.php)
+- Error Handler: [class-md-import-force-error-handler.php](mdc:includes/class-md-import-force-error-handler.php)
+
+### Importers
+- Post Importer: [class-md-import-force-post-importer.php](mdc:includes/class-md-import-force-post-importer.php)
+- Taxonomy Importer: [class-md-import-force-taxonomy-importer.php](mdc:includes/class-md-import-force-taxonomy-importer.php)
+- Comment Importer: [class-md-import-force-comment-importer.php](mdc:includes/class-md-import-force-comment-importer.php)
+
+### Utility Classes
+- File Manager: [class-md-import-force-file-manager.php](mdc:includes/class-md-import-force-file-manager.php)
+- Logger: [class-md-import-force-logger.php](mdc:includes/class-md-import-force-logger.php)
+- Progress Tracker: [class-md-import-force-progress-tracker.php](mdc:includes/class-md-import-force-progress-tracker.php)
+
+### Management Classes
+- Import Manager: [class-md-import-force-import-manager.php](mdc:includes/class-md-import-force-import-manager.php)
+- Schema Cleaner: [class-md-import-force-schema-cleaner.php](mdc:includes/class-md-import-force-schema-cleaner.php)
