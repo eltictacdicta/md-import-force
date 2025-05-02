@@ -1,0 +1,36 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# WordPress Integration Rules for Cursor
+
+## WordPress Core Functions
+
+When working with WordPress plugins in Cursor, you will see linter errors for WordPress core functions that are not defined in the project. These functions are actually provided by WordPress at runtime and don't need to be defined in our plugin.
+
+### Common WordPress Functions to Ignore Linter Errors
+
+- `plugin_dir_path()`, `plugin_dir_url()` - Get plugin directory paths
+- `add_action()`, `add_filter()` - Hook into WordPress actions and filters
+- `register_activation_hook()`, `register_deactivation_hook()` - Register activation/deactivation hooks
+- `__()`, `_e()` - Translation functions
+- `wp_enqueue_script()`, `wp_enqueue_style()` - Enqueue scripts and styles
+- `wp_localize_script()` - Pass data to JavaScript
+- `admin_url()`, `wp_create_nonce()` - Admin URLs and security nonces
+- `add_menu_page()`, `add_submenu_page()` - Add admin menu items
+
+### WordPress Database Functions
+
+- `$wpdb` - WordPress database object
+- `global $wpdb` - Access to the WordPress database
+
+### WordPress Post/User/Term Functions
+
+- `get_post()`, `wp_insert_post()`, `wp_update_post()` - Post manipulation
+- `get_term()`, `wp_insert_term()`, `wp_update_term()` - Term manipulation
+- `get_user_by()`, `wp_insert_user()` - User manipulation
+
+## Handling Linter Errors
+
+Linter errors for WordPress functions can be safely ignored in standalone IDE environments. The code will work correctly when loaded within WordPress.

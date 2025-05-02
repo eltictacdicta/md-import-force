@@ -28,5 +28,4 @@ JavaScript functionality is organized in modular files, loaded in sequence by [i
 - [import.js](mdc:assets/js/admin/import.js) - Import process management
 - [log.js](mdc:assets/js/admin/log.js) - Log display handling
 - [cleanup.js](mdc:assets/js/admin/cleanup.js) - Cleanup operations
-- [schema-cleaner.js](mdc:assets/js/admin/schema-cleaner.js) - Schema cleaning functionality
 - [main.js](mdc:assets/js/admin/main.js) - Final initialization

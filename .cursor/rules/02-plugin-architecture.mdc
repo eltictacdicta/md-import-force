@@ -1,6 +1,6 @@
 ---
-description:
-globs:
+description: 
+globs: 
 alwaysApply: false
 ---
 # Plugin Architecture
@@ -32,4 +32,3 @@ The MD Import Force plugin follows an object-oriented architecture with several 
 
 ### Management Classes
 - Import Manager: [class-md-import-force-import-manager.php](mdc:includes/class-md-import-force-import-manager.php)
-- Schema Cleaner: [class-md-import-force-schema-cleaner.php](mdc:includes/class-md-import-force-schema-cleaner.php)

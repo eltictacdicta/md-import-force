@@ -21,3 +21,9 @@ This WordPress plugin allows for importing content with specific IDs. The main e
 - Admin Interface: [admin-page.php](mdc:templates/admin-page.php)
 - JavaScript Core: [index.js](mdc:assets/js/admin/index.js) loads all client-side modules
 
+## WordPress Integration Notes
+
+- WordPress Core Functions: Functions like `plugin_dir_path()`, `add_action()`, `__()`, `wp_enqueue_script()`, etc. are native WordPress functions and do not need to be defined in this project.
+- These functions are available automatically when the plugin is loaded in WordPress.
+- Linter errors for these functions in standalone IDE environments can be ignored.
+

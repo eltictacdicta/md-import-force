@@ -17,8 +17,20 @@ define('MD_IMPORT_FORCE_VERSION', '1.0.0');
 define('MD_IMPORT_FORCE_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('MD_IMPORT_FORCE_PLUGIN_URL', plugin_dir_url(__FILE__));
 
-// Incluir el inicializador del plugin
-require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-initializer.php';
+// Cargar dependencias principales
+require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-logger.php';
+require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-error-handler.php';
+require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-file-manager.php';
+require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-file-processor.php';
+require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-progress-tracker.php';
+require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-url-handler.php';
+require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-post-importer.php';
+require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-taxonomy-importer.php';
+require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-media-handler.php';
+require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-comment-importer.php';
+require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-import-manager.php';
+require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-ajax-handler.php';
+require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-handler.php';
 
 /**
  * Clase principal del plugin
@@ -36,9 +48,6 @@ class MD_Import_Force {
         // Inicializar el plugin
         add_action('admin_menu', array($this, 'add_admin_menu'));
         add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_scripts'));
-
-        // Inicializar el limpiador de schema
-        new MD_Import_Force_Schema_Cleaner();
     }
 
     /**
@@ -102,18 +111,36 @@ class MD_Import_Force {
 
 // Inicializar el plugin
 function md_import_force_init() {
-    MD_Import_Force_Initializer::init();
+    // Inicializar la clase principal
+    MD_Import_Force::get_instance();
+    
+    // Inicializar el manejador AJAX
+    new MD_Import_Force_Ajax_Handler();
 }
 add_action('plugins_loaded', 'md_import_force_init');
 
 // Activación del plugin
 register_activation_hook(__FILE__, 'md_import_force_activate');
 function md_import_force_activate() {
-    MD_Import_Force_Initializer::activate();
+    // Crear directorios necesarios
+    $file_manager = new MD_Import_Force_File_Manager();
+    $file_manager->ensure_directories();
+
+    // Registrar en el log
+    if (class_exists('MD_Import_Force_Logger')) {
+        MD_Import_Force_Logger::log_message("MD Import Force: Plugin activado");
+    }
 }
 
 // Desactivación del plugin
 register_deactivation_hook(__FILE__, 'md_import_force_deactivate');
 function md_import_force_deactivate() {
-    MD_Import_Force_Initializer::deactivate();
+    // Limpiar opciones si es necesario
+    delete_option('md_import_force_progress_data');
+    delete_option('md_import_force_current_session');
+
+    // Registrar en el log
+    if (class_exists('MD_Import_Force_Logger')) {
+        MD_Import_Force_Logger::log_message("MD Import Force: Plugin desactivado");
+    }
 }

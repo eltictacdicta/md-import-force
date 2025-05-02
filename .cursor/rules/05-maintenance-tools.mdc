@@ -7,14 +7,6 @@ alwaysApply: false
 
 The plugin includes tools for maintenance and cleanup of imported content.
 
-## Schema Cleaning
-
-Schema cleaning functionality is implemented in [class-md-import-force-schema-cleaner.php](mdc:includes/class-md-import-force-schema-cleaner.php) and provides:
-- Removal of problematic Rank Math schema data
-- Cleanup of schema metadata from specific posts or all posts
-
-The frontend interface for schema cleaning is handled by [schema-cleaner.js](mdc:assets/js/admin/schema-cleaner.js).
-
 ## File Cleanup
 
 File cleanup functionality:
