@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test MD Import Force REST API</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        h1 {
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+        }
+        .test-section {
+            margin-bottom: 30px;
+            border: 1px solid #ddd;
+            padding: 15px;
+            border-radius: 5px;
+        }
+        .test-section h2 {
+            margin-top: 0;
+        }
+        button {
+            background-color: #0066cc;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:hover {
+            background-color: #0055aa;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            margin-top: 10px;
+        }
+        input[type="text"], 
+        input[type="number"], 
+        input[type="file"] {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>Test MD Import Force REST API</h1>
+    <p>Esta página permite probar los endpoints REST API del plugin MD Import Force.</p>
+
+    <div class="test-section">
+        <h2>Configuración</h2>
+        <label for="rest-url">URL de la REST API:</label>
+        <input type="text" id="rest-url" value="/wp-json/md-import-force/v1/" placeholder="URL base de la REST API">
+        
+        <label for="rest-nonce">WP REST Nonce:</label>
+        <input type="text" id="rest-nonce" placeholder="Ingresa el nonce de WP REST">
+        
+        <p>Para obtener el nonce correcto, copia y pega este código en la consola del navegador mientras estás en la página del plugin:</p>
+        <pre>console.log("REST Nonce: " + md_import_force.rest_nonce);</pre>
+    </div>
+
+    <div class="test-section">
+        <h2>Leer Log</h2>
+        <button id="test-read-log">Leer Log</button>
+        <pre id="read-log-result">Los resultados aparecerán aquí...</pre>
+    </div>
+
+    <div class="test-section">
+        <h2>Limpiar Log</h2>
+        <button id="test-clear-log">Limpiar Log</button>
+        <pre id="clear-log-result">Los resultados aparecerán aquí...</pre>
+    </div>
+
+    <div class="test-section">
+        <h2>Verificar Progreso</h2>
+        <button id="test-check-progress">Verificar Progreso</button>
+        <pre id="check-progress-result">Los resultados aparecerán aquí...</pre>
+    </div>
+
+    <div class="test-section">
+        <h2>Limpiar Archivos</h2>
+        <label for="cleanup-hours">Horas:</label>
+        <input type="number" id="cleanup-hours" value="24" min="1" max="720">
+        <button id="test-cleanup">Limpiar Archivos</button>
+        <pre id="cleanup-result">Los resultados aparecerán aquí...</pre>
+    </div>
+
+    <div class="test-section">
+        <h2>Subir Archivo</h2>
+        <label for="upload-file">Archivo:</label>
+        <input type="file" id="upload-file">
+        <button id="test-upload">Subir Archivo</button>
+        <pre id="upload-result">Los resultados aparecerán aquí...</pre>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Función auxiliar para realizar peticiones fetch a la API REST
+            function apiFetch(endpoint, options = {}) {
+                const baseUrl = document.getElementById('rest-url').value;
+                const nonce = document.getElementById('rest-nonce').value;
+                
+                if (!nonce) {
+                    alert('Por favor, ingresa un nonce válido en la sección de configuración.');
+                    return Promise.reject(new Error('Nonce no proporcionado'));
+                }
+                
+                // Asegurarse de que options.headers existe
+                options.headers = options.headers || {};
+                
+                // Añadir el nonce para seguridad de la API REST
+                options.headers['X-WP-Nonce'] = nonce;
+                
+                // URL completa
+                const url = baseUrl + endpoint;
+                
+                // Realizar la petición
+                return fetch(url, options)
+                    .then(response => {
+                        if (!response.ok) {
+                            // Intentar obtener el mensaje de error del cuerpo JSON
+                            return response.json()
+                                .then(errorData => {
+                                    throw new Error(errorData.message || `Error HTTP: ${response.status}`);
+                                })
+                                .catch(err => {
+                                    // Si no es JSON o falla al parsear, usar el status
+                                    throw new Error(`Error HTTP: ${response.status} ${response.statusText}`);
+                                });
+                        }
+                        return response.json();
+                    });
+            }
+
+            // Función para mostrar los resultados en formato JSON bonito
+            function displayResult(elementId, data) {
+                const element = document.getElementById(elementId);
+                element.textContent = JSON.stringify(data, null, 2);
+            }
+
+            // Test: Leer Log
+            document.getElementById('test-read-log').addEventListener('click', function() {
+                apiFetch('log', {
+                    method: 'GET'
+                })
+                .then(response => {
+                    displayResult('read-log-result', response);
+                })
+                .catch(error => {
+                    displayResult('read-log-result', { error: error.message });
+                });
+            });
+
+            // Test: Limpiar Log
+            document.getElementById('test-clear-log').addEventListener('click', function() {
+                apiFetch('log', {
+                    method: 'DELETE'
+                })
+                .then(response => {
+                    displayResult('clear-log-result', response);
+                })
+                .catch(error => {
+                    displayResult('clear-log-result', { error: error.message });
+                });
+            });
+
+            // Test: Verificar Progreso
+            document.getElementById('test-check-progress').addEventListener('click', function() {
+                apiFetch('progress', {
+                    method: 'GET'
+                })
+                .then(response => {
+                    displayResult('check-progress-result', response);
+                })
+                .catch(error => {
+                    displayResult('check-progress-result', { error: error.message });
+                });
+            });
+
+            // Test: Limpiar Archivos
+            document.getElementById('test-cleanup').addEventListener('click', function() {
+                const hours = document.getElementById('cleanup-hours').value;
+                
+                // Mostrar mensaje de procesamiento
+                displayResult('cleanup-result', { status: 'procesando...' });
+                
+                // Preparar los datos para enviar
+                const formData = new FormData();
+                formData.append('hours', hours);
+                
+                // URL completa
+                const baseUrl = document.getElementById('rest-url').value;
+                const endpoint = 'cleanup';
+                const url = baseUrl + endpoint;
+                const nonce = document.getElementById('rest-nonce').value;
+                
+                if (!nonce) {
+                    alert('Por favor, ingresa un nonce válido en la sección de configuración.');
+                    displayResult('cleanup-result', { error: 'Nonce no proporcionado' });
+                    return;
+                }
+                
+                // Realizar la petición con Fetch API nativo
+                fetch(url, {
+                    method: 'POST',
+                    body: formData,
+                    headers: {
+                        'X-WP-Nonce': nonce
+                    }
+                })
+                .then(response => {
+                    // Verificar si la respuesta es exitosa (código 200-299)
+                    if (!response.ok) {
+                        return response.text().then(text => {
+                            try {
+                                // Intentar parsear como JSON
+                                const errorData = JSON.parse(text);
+                                throw new Error(errorData.message || `Error HTTP: ${response.status}`);
+                            } catch (parseError) {
+                                // Si falla el parsing, mostrar el texto crudo
+                                throw new Error(`Error HTTP ${response.status}: ${text.substring(0, 150)}...`);
+                            }
+                        });
+                    }
+                    
+                    // Intentar parsear la respuesta como JSON
+                    return response.text().then(text => {
+                        try {
+                            return JSON.parse(text);
+                        } catch (error) {
+                            // Si falla el parsing, mostrar el texto original
+                            throw new Error(`Error de parsing JSON: ${text.substring(0, 150)}...`);
+                        }
+                    });
+                })
+                .then(data => {
+                    // Mostrar los datos en formato JSON bonito
+                    displayResult('cleanup-result', data);
+                })
+                .catch(error => {
+                    // Mostrar el error
+                    displayResult('cleanup-result', { error: error.message });
+                });
+            });
+
+            // Test: Subir Archivo
+            document.getElementById('test-upload').addEventListener('click', function() {
+                const fileInput = document.getElementById('upload-file');
+                
+                if (!fileInput.files.length) {
+                    alert('Por favor, selecciona un archivo para subir.');
+                    return;
+                }
+                
+                const formData = new FormData();
+                formData.append('import_file', fileInput.files[0]);
+                
+                apiFetch('upload', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => {
+                    displayResult('upload-result', response);
+                })
+                .catch(error => {
+                    displayResult('upload-result', { error: error.message });
+                });
+            });
+        });
+    </script>
+</body>
+</html> 

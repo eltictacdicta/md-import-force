@@ -22,7 +22,14 @@ class MD_Import_Force_Logger {
     public static function log_message( $message ) {
         $log_file = __DIR__ . '/../logs/md-import-force.log';
         $timestamp = date( 'Y-m-d H:i:s' );
-        $log_entry = "[{$timestamp}] {$message}" . PHP_EOL;
+
+        if (is_array($message) || is_object($message)) {
+            $message_str = print_r($message, true);
+        } else {
+            $message_str = $message;
+        }
+
+        $log_entry = "[{$timestamp}] {$message_str}" . PHP_EOL;
 
         // Ensure the logs directory exists
         $log_dir = dirname( $log_file );

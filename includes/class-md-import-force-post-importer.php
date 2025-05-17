@@ -9,12 +9,14 @@ if (!defined('ABSPATH')) {
 
 // Incluir el rastreador de elementos omitidos
 require_once(dirname(__FILE__) . '/class-md-import-force-skipped-items-tracker.php');
+// Asegurarse que el progress tracker está disponible para los métodos estáticos
+require_once(dirname(__FILE__) . '/class-md-import-force-progress-tracker.php');
 
 class MD_Import_Force_Post_Importer {
 
     private $id_mapping = [];
     private $source_site_info = [];
-    private $progress_tracker;
+    // private $progress_tracker; // No longer an instance property
     private $media_handler;
     private $taxonomy_importer;
     private $comment_importer;
@@ -25,15 +27,15 @@ class MD_Import_Force_Post_Importer {
         $source_site_info = [],
         $taxonomy_importer = null,
         $media_handler = null,
-        $comment_importer = null,
-        $progress_tracker = null
+        $comment_importer = null
+        // $progress_tracker = null // Removed from constructor
     ) {
         $this->id_mapping = $id_mapping;
         $this->source_site_info = $source_site_info;
         $this->taxonomy_importer = $taxonomy_importer ?: new MD_Import_Force_Taxonomy_Importer($id_mapping);
         $this->media_handler = $media_handler ?: new MD_Import_Force_Media_Handler($source_site_info);
         $this->comment_importer = $comment_importer ?: new MD_Import_Force_Comment_Importer();
-        $this->progress_tracker = $progress_tracker ?: new MD_Import_Force_Progress_Tracker();
+        // $this->progress_tracker = $progress_tracker ?: new MD_Import_Force_Progress_Tracker(); // Removed
         $this->skipped_items_tracker = MD_Import_Force_Skipped_Items_Tracker::get_instance();
     }
 
@@ -62,85 +64,111 @@ class MD_Import_Force_Post_Importer {
 
     /**
      * Importa posts/páginas uno por uno.
+     * @param array $items_data Datos de los posts a importar.
+     * @param string $import_id ID único de la importación global.
+     * @param array $options Opciones de importación.
+     * @param int &$overall_processed_count_ref Referencia al contador global de elementos procesados (actualizado por este método).
+     * @param int $overall_total_items_in_file Total de elementos en el archivo de importación global.
+     * @return array Estadísticas de esta tanda de posts (new_count, updated_count, skipped_count, etc.).
      */
-    public function import_posts($items_data) {
-        $imported = 0; $updated = 0; $skipped = 0; $total = count($items_data);
-        MD_Import_Force_Logger::log_message("MD Import Force: Procesando {$total} posts/páginas...");
+    public function import_posts($items_data, $import_id, $options, &$overall_processed_count_ref, $overall_total_items_in_file) {
+        $new_count_local = 0; 
+        $updated_count_local = 0; 
+        $skipped_count_local = 0;
+        $total_items_in_this_batch = count($items_data);
+        
+        MD_Import_Force_Logger::log_message("MD Import Force [POST_IMPORTER]: Iniciando procesamiento de {$total_items_in_this_batch} posts para import_id: {$import_id}. Avance global actual: {$overall_processed_count_ref}/{$overall_total_items_in_file}");
 
-        // Limpiar el rastreador de elementos omitidos antes de comenzar
-        $this->skipped_items_tracker->clear();
+        // Limpiar el rastreador de elementos omitidos para esta tanda (si se quiere por tanda, o globalmente en Handler)
+        // Si es global, el Handler lo gestiona. Si es por tanda (ej. por JSON en un ZIP), aquí.
+        // $this->skipped_items_tracker->clear(); // Comentado, la gestión de skipped_items es ahora más global en el Handler.
 
-        // Enviar información de inicio para la barra de progreso
-        $this->progress_tracker->send_progress_update(0, $total, null);
-
-        $count = 0;
-        $update_frequency = max(1, intval($total / 20)); // Actualizar aproximadamente 20 veces durante el proceso
+        // No se usa el $this->progress_tracker, se usan los métodos estáticos de MD_Import_Force_Progress_Tracker
+        // La actualización inicial de progreso (total_items_in_file) la hace el Handler.
 
         foreach ($items_data as $item_data) {
-            $count++;
+            $overall_processed_count_ref++; // Incrementar el contador global de procesados
+            
+            // Verificar si se ha solicitado detener las importaciones (global o específica)
+            if (get_option('md_import_force_stop_all_imports_requested', false) || get_transient('md_import_force_stop_request_' . $import_id)) {
+                $stop_reason = get_transient('md_import_force_stop_request_' . $import_id) 
+                    ? "solicitud específica para import_id {$import_id}" 
+                    : "solicitud global";
+                    
+                MD_Import_Force_Logger::log_message("MD Import Force [STOP REQUESTED]: Importación detenida por {$stop_reason} después de procesar {$overall_processed_count_ref} elementos.");
+                
+                // Actualizar el progreso indicando que se detuvo manualmente
+                MD_Import_Force_Progress_Tracker::update_status(
+                    $import_id, 
+                    'stopped', 
+                    __('Importación detenida manualmente por el usuario.', 'md-import-force')
+                );
+                
+                // Devolver los resultados parciales hasta el momento de la detención
+                return [
+                    'new_count' => $new_count_local,
+                    'updated_count' => $updated_count_local,
+                    'skipped_count' => $skipped_count_local,
+                    'processed_count' => $overall_processed_count_ref,
+                    'total_count' => $overall_total_items_in_file,
+                    'stopped_manually' => true,
+                    'message' => __('Importación detenida manualmente por el usuario.', 'md-import-force')
+                ];
+            }
+
             $id = $item_data['ID'] ?? 'N/A';
             $title = $item_data['post_title'] ?? '[Sin Título]';
             $type = $item_data['post_type'] ?? 'post';
 
-            // Enviar actualización de progreso solo cada cierto número de elementos
-            // o para el primer y último elemento
-            if ($count == 1 || $count == $total || $count % $update_frequency == 0) {
-                $current_item = "ID: {$id} - {$title} ({$type})";
-                $this->progress_tracker->send_progress_update($count, $total, $current_item);
-            }
+            $current_item_message = sprintf(__('Procesando (%d/%d): %s ID %s (%s)', 'md-import-force'),
+                $overall_processed_count_ref,
+                $overall_total_items_in_file,
+                $type,
+                $id,
+                $title
+            );
+            MD_Import_Force_Progress_Tracker::update_progress(
+                $import_id,
+                $overall_processed_count_ref,
+                $overall_total_items_in_file,
+                $current_item_message
+            );
 
             try {
-                $res = $this->process_post_item($item_data);
-                if ($res === 'imported') $imported++;
-                elseif ($res === 'updated') $updated++;
-                else $skipped++;
+                $res = $this->process_post_item($item_data); // $options se podrían pasar aquí si process_post_item los necesita
+                if ($res === 'imported') $new_count_local++;
+                elseif ($res === 'updated') $updated_count_local++;
+                else $skipped_count_local++;
             } catch (Exception $e) {
-                MD_Import_Force_Logger::log_message("MD Import Force [ERROR] Post/Página ID {$id} ('{$title}'): " . $e->getMessage());
-                $skipped++;
-                // Registrar el elemento omitido debido a error
+                MD_Import_Force_Logger::log_message("MD Import Force [POST_IMPORTER ERROR] Post/Página ID {$id} ('{$title}') para import_id {$import_id}: " . $e->getMessage());
+                $skipped_count_local++;
                 $this->skipped_items_tracker->add_skipped_item($id, $title, $type, $e->getMessage());
             }
-            if (function_exists('wp_cache_flush')) wp_cache_flush(); if (function_exists('gc_collect_cycles')) gc_collect_cycles();
-
-            // No hacemos pausa en cada iteración para mejorar el rendimiento
-            // Solo hacemos pausa cuando enviamos una actualización de progreso
+            // No wp_cache_flush o gc_collect_cycles aquí para no ralentizar el proceso en segundo plano.
+            // El Handler puede hacer un flush al final de todo el job si es necesario.
         }
 
-        // Enviar actualización final
-        $this->progress_tracker->send_progress_update($total, $total, __('Importación completada con éxito', 'md-import-force'));
+        // Las actualizaciones finales de progreso (mark_complete o failed) las hace el cron job execute_background_import
+        // basado en el resultado del Handler.
 
-        // Asegurarse de que los datos se envíen al navegador
-        if (function_exists('ob_flush')) ob_flush();
-        if (function_exists('flush')) flush();
+        $msg = sprintf(__('Sub-tanda de Posts/Páginas: %d nuevos, %d actualizados, %d omitidos.', 'md-import-force'), $new_count_local, $updated_count_local, $skipped_count_local);
+        MD_Import_Force_Logger::log_message("MD Import Force [POST_IMPORTER]: " . $msg . " para import_id {$import_id}");
 
-        // Esperar un momento para asegurar que los datos se envíen
-        usleep(500000); // 0.5 segundos
-
-        // Marcar la importación como completada
-        if (method_exists($this->progress_tracker, 'mark_as_completed')) {
-            $this->progress_tracker->mark_as_completed();
-
-            // Asegurarse de que los datos de completado se envíen al navegador
-            if (function_exists('ob_flush')) ob_flush();
-            if (function_exists('flush')) flush();
-        }
-
-        $msg = sprintf(__('Posts/Páginas: %d nuevos, %d actualizados, %d omitidos.', 'md-import-force'), $imported, $updated, $skipped);
-        MD_Import_Force_Logger::log_message("MD Import Force: " . $msg);
-
-        // Obtener los elementos omitidos para incluirlos en la respuesta
-        $skipped_items = $this->skipped_items_tracker->get_skipped_items();
-
-        // Registrar en el log para depuración
-        MD_Import_Force_Logger::log_message("MD Import Force [DEBUG]: Elementos omitidos para incluir en respuesta: " . json_encode($skipped_items));
+        // Skipped items son acumulados globalmente por el Handler ahora.
+        // Aquí solo devolvemos las stats de esta tanda específica.
+        // El skipped_items_tracker es una instancia singleton, así que el Handler puede obtener el global.
+        // Sin embargo, para ZIPs, el Handler podría querer stats por archivo JSON.
+        // Por simplicidad, el Handler acumulará los skipped_items.
 
         return [
-            'success' => true,
-            'new_count' => $imported,
-            'updated_count' => $updated,
-            'skipped_count' => $skipped,
-            'skipped_items' => $skipped_items,
+            // 'success' => true, // El handler determinará el success general
+            'new_count' => $new_count_local,
+            'updated_count' => $updated_count_local,
+            'skipped_count' => $skipped_count_local,
+            // 'skipped_items' => $this->skipped_items_tracker->get_skipped_items_for_current_batch(), // Si el tracker lo soportara
             'message' => $msg
+            // No devolver 'skipped_items' aquí directamente, el Handler lo recuperará de $this->skipped_items_tracker globalmente si es necesario
+            // o lo acumulará a partir de los errores y skips que logueamos y contamos.
         ];
     }
 

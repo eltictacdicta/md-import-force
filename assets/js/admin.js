@@ -1,11 +1,20 @@
-jQuery(document).ready(function($) {
+document.addEventListener('DOMContentLoaded', function() {
     // ===== FUNCIONES AUXILIARES =====
 
     // Función para mostrar mensajes en la interfaz
     function showMessage(message, type, targetElement) {
         var color = type === 'success' ? 'green' : (type === 'error' ? 'red' : 'inherit');
-        var target = targetElement || '#md-import-force-messages';
-        $(target).html('<p style="color: ' + color + '">' + message + '</p>');
+        var targetSelector = targetElement || '#md-import-force-messages'; // Default target
+        const messageContainer = document.querySelector(targetSelector);
+        if (messageContainer) {
+            // Sanitize message before inserting as HTML if it can contain user-generated content not intended as HTML
+            // For simple text messages, this is okay. If 'message' could contain HTML, consider textContent or a sanitizer.
+            messageContainer.innerHTML = '<p style="color: ' + color + '">' + message + '</p>';
+        } else {
+            console.error('Error: Target element ' + targetSelector + ' not found for showMessage. Message: ' + message);
+            // As a fallback, you could use alert or log to a more generic console area
+            // if the specific message area isn't found.
+        }
     }
 
     // Función para mostrar mensaje de éxito
@@ -30,81 +39,39 @@ jQuery(document).ready(function($) {
 
     // Función para ocultar/mostrar elementos de progreso
     function toggleProgressElements(show) {
+        const progressElement = document.getElementById('md-import-force-progress');
+        const currentItemElement = document.getElementById('md-import-force-current-item');
+        
         if (show) {
-            $('#md-import-force-progress').show();
-            $('#md-import-force-current-item').show();
+            if (progressElement) progressElement.style.display = 'block';
+            if (currentItemElement) currentItemElement.style.display = 'block';
         } else {
-            $('#md-import-force-progress').hide();
-            $('#md-import-force-current-item').hide();
+            if (progressElement) progressElement.style.display = 'none';
+            if (currentItemElement) currentItemElement.style.display = 'none';
         }
-    }
-
-    // Función auxiliar para realizar solicitudes AJAX usando XMLHttpRequest
-    function ajaxRequest(options) {
-        return new Promise(function(resolve, reject) {
-            var xhr = new XMLHttpRequest();
-
-            // Configurar la solicitud
-            xhr.open(options.type || 'GET', options.url, true);
-
-            // Configurar el manejo de la respuesta
-            xhr.onreadystatechange = function() {
-                if (xhr.readyState === 4) {
-                    if (xhr.status >= 200 && xhr.status < 300) {
-                        var response;
-                        try {
-                            response = JSON.parse(xhr.responseText);
-                        } catch (e) {
-                            response = xhr.responseText;
-                        }
-                        resolve(response);
-                    } else {
-                        reject({
-                            status: xhr.status,
-                            statusText: xhr.statusText,
-                            responseText: xhr.responseText
-                        });
-                    }
-                }
-            };
-
-            // Manejar errores de red
-            xhr.onerror = function() {
-                reject({
-                    status: 0,
-                    statusText: 'Error de red',
-                    responseText: ''
-                });
-            };
-
-            // Enviar los datos
-            if (options.data instanceof FormData) {
-                xhr.send(options.data);
-            } else if (typeof options.data === 'object' && options.data !== null) {
-                // Convertir objeto a cadena de consulta
-                var params = [];
-                for (var key in options.data) {
-                    if (options.data.hasOwnProperty(key)) {
-                        params.push(encodeURIComponent(key) + '=' + encodeURIComponent(options.data[key]));
-                    }
-                }
-                xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
-                xhr.send(params.join('&'));
-            } else {
-                xhr.send();
-            }
-        });
     }
 
     // ===== FUNCIONES DE NAVEGACIÓN POR PESTAÑAS =====
 
     // Función para cambiar de pestaña
     function switchTab(tab) {
-        $('.nav-tab-wrapper a').removeClass('nav-tab-active');
-        $('.nav-tab-wrapper a[data-tab="' + tab + '"]').addClass('nav-tab-active');
+        // Desactivar todas las pestañas
+        document.querySelectorAll('.nav-tab-wrapper a').forEach(function(el) {
+            el.classList.remove('nav-tab-active');
+        });
+        
+        // Activar la pestaña seleccionada
+        const activeTab = document.querySelector('.nav-tab-wrapper a[data-tab="' + tab + '"]');
+        if (activeTab) activeTab.classList.add('nav-tab-active');
 
-        $('.tab-content').hide();
-        $('#tab-' + tab).show();
+        // Ocultar todos los contenidos
+        document.querySelectorAll('.tab-content').forEach(function(el) {
+            el.style.display = 'none';
+        });
+        
+        // Mostrar el contenido seleccionado
+        const tabContent = document.getElementById('tab-' + tab);
+        if (tabContent) tabContent.style.display = 'block';
 
         // Si la pestaña del log está activa, cargar el log
         if (tab === 'log') {
@@ -113,11 +80,44 @@ jQuery(document).ready(function($) {
     }
 
     // Manejo de pestañas
-    $('.nav-tab-wrapper a').on('click', function(e) {
-        e.preventDefault();
-        var tab = $(this).data('tab');
-        switchTab(tab);
+    document.querySelectorAll('.nav-tab-wrapper a').forEach(function(tabLink) {
+        tabLink.addEventListener('click', function(e) {
+            e.preventDefault();
+            const tab = this.getAttribute('data-tab');
+            switchTab(tab);
+        });
     });
+
+    // ===== FUNCIONES DE API FETCH =====
+
+    // Función para realizar peticiones Fetch a la REST API
+    function apiFetch(endpoint, options = {}) {
+        // Asegurarse de que options.headers existe
+        options.headers = options.headers || {};
+        
+        // Añadir el nonce para seguridad de la API REST
+        options.headers['X-WP-Nonce'] = md_import_force.rest_nonce;
+        
+        // URL completa
+        const url = md_import_force.rest_url + endpoint;
+        
+        // Realizar la petición
+        return fetch(url, options)
+            .then(response => {
+                if (!response.ok) {
+                    // Intentar obtener el mensaje de error del cuerpo JSON
+                    return response.json()
+                        .then(errorData => {
+                            throw new Error(errorData.message || `Error HTTP: ${response.status}`);
+                        })
+                        .catch(err => {
+                            // Si no es JSON o falla al parsear, usar el status
+                            throw new Error(`Error HTTP: ${response.status} ${response.statusText}`);
+                        });
+                }
+                return response.json();
+            });
+    }
 
     // ===== FUNCIONES DE PREVISUALIZACIÓN =====
 
@@ -129,511 +129,396 @@ jQuery(document).ready(function($) {
         // Guardar la ruta del archivo para usarla en la importación
         previewFilePath = previewData.file_path;
 
-        $('#md-import-force-preview-area').show();
-        var preview_content = '<h4>Información del sitio de origen:</h4>';
-        preview_content += '<p>URL: ' + previewData.site_info.site_url + '</p>';
-        preview_content += '<p>Nombre: ' + previewData.site_info.site_name + '</p>';
-        preview_content += '<h4>Primeros ' + previewData.preview_records.length + ' de ' + previewData.total_records + ' registros:</h4>';
-        preview_content += '<ul>';
-        previewData.preview_records.forEach(function(record) {
-            preview_content += '<li>ID: ' + record.ID + ', Título: ' + record.post_title + ', Tipo: ' + record.post_type + '</li>';
-        });
-        preview_content += '</ul>';
-        $('#md-import-force-preview-content').html(preview_content);
+        const previewArea = document.getElementById('md-import-force-preview-area');
+        const previewContent = document.getElementById('md-import-force-preview-content');
+        
+        if (previewArea) previewArea.style.display = 'block';
+        
+        if (previewContent) {
+            // Helper for escaping HTML
+            const escapeHtml = (unsafe) => {
+                if (typeof unsafe !== 'string') {
+                    // Attempt to convert to string if not already, e.g. for numbers like record.ID
+                    if (typeof unsafe === 'number' || typeof unsafe === 'boolean') {
+                        return String(unsafe);
+                    }
+                    return ''; // Or handle other types as needed, returning empty for undefined/null
+                }
+                return unsafe
+                     .replace(/&/g, "&amp;")
+                     .replace(/</g, "&lt;")
+                     .replace(/>/g, "&gt;")
+                     .replace(/"/g, "&quot;")
+                     .replace(/'/g, "&#039;");
+            }
+
+            let content = '<h4>Información del sitio de origen:</h4>';
+            content += '<p>URL: ' + escapeHtml(previewData.site_info.site_url) + '</p>';
+            content += '<p>Nombre: ' + escapeHtml(previewData.site_info.site_name) + '</p>';
+            content += '<h4>Primeros ' + escapeHtml(String(previewData.preview_records.length)) + ' de ' + escapeHtml(String(previewData.total_records)) + ' registros:</h4>';
+            content += '<ul>';
+            
+            previewData.preview_records.forEach(function(record) {
+                content += '<li>ID: ' + escapeHtml(String(record.ID)) + 
+                           ', Título: ' + escapeHtml(record.post_title) + 
+                           ', Tipo: ' + escapeHtml(record.post_type) + '</li>';
+            });
+            
+            content += '</ul>';
+            previewContent.innerHTML = content;
+        }
     }
 
     // Función para realizar la previsualización
     function previewImportFile(file) {
-        var formData = new FormData();
-        formData.append('action', 'md_import_force_preview');
-        formData.append('nonce', md_import_force.nonce);
+        const formData = new FormData();
         formData.append('import_file', file);
 
         // Mostrar indicador de carga
         showMessage(md_import_force.i18n.uploading, 'info');
-        $('#md-import-force-preview-area').hide();
-        $('#md-import-force-progress').hide();
+        
+        const previewArea = document.getElementById('md-import-force-preview-area');
+        const progressArea = document.getElementById('md-import-force-progress');
+        
+        if (previewArea) previewArea.style.display = 'none';
+        if (progressArea) progressArea.style.display = 'none';
 
-        // Usar nuestra función ajaxRequest para mantener consistencia
-        ajaxRequest({
-            url: md_import_force.ajax_url,
-            type: 'POST',
-            data: formData
+        // Usar Fetch API para la previsualización
+        apiFetch('preview', {
+            method: 'POST',
+            body: formData
         })
-        .then(function(response) {
-            $('#md-import-force-messages').empty();
+        .then(response => {
+            const messagesElement = document.getElementById('md-import-force-messages');
+            if (messagesElement) messagesElement.innerHTML = '';
+            
             if (response.success) {
-                displayPreview(response.data);
+                displayPreview(response.data || response);
             } else {
-                showErrorMessage(response.data);
+                showErrorMessage(response.data || response);
             }
         })
-        .catch(function(error) {
-            console.error('Error en la previsualización:', error);
-            showMessage(md_import_force.i18n.error + ': ' + (error.statusText || 'Error al procesar la respuesta del servidor'), 'error');
+        .catch(error => {
+            console.error('Error en la previsualización:', error.message);
+            showMessage(md_import_force.i18n.error + ': ' + error.message, 'error');
         });
     }
 
     // Manejo del botón de previsualización
-    $('#md-import-force-preview-button').on('click', function(e) {
-        e.preventDefault();
+    const previewButton = document.getElementById('md-import-force-preview-button');
+    if (previewButton) {
+        previewButton.addEventListener('click', function(e) {
+            e.preventDefault();
 
-        var file_input = $('#import_file')[0];
-        if (file_input.files.length === 0) {
-            alert('Por favor, selecciona un archivo JSON o ZIP para previsualizar.');
-            return;
-        }
-
-        previewImportFile(file_input.files[0]);
-    });
-
-    // Manejo del botón de importar (mantener lógica existente, añadir nonce)
-    $('#md-import-force-form').on('submit', function(e) {
-        e.preventDefault();
-
-        // Guardar el tiempo de inicio de la importación
-        $(this).data('start-time', new Date().getTime() / 1000);
-
-        // Verificar si tenemos un archivo para importar
-        if (!previewFilePath) {
-            alert('Por favor, primero previsualiza un archivo antes de importar.');
-            return;
-        }
-
-        var form = $(this);
-        var formData = new FormData(form[0]);
-        formData.append('action', 'md_import_force_import');
-        formData.append('nonce', md_import_force.nonce); // Añadir nonce
-        formData.append('file_path', previewFilePath); // Añadir la ruta del archivo previamente subido
-
-        // Ocultar previsualización y mostrar mensajes/progreso
-        $('#md-import-force-preview-area').hide();
-        $('#md-import-force-messages').html('<p>' + md_import_force.i18n.importing + '</p>'); // Usar i18n
-        $('#md-import-force-progress').show(); // Mostrar progreso
-
-        // Inicializar la interfaz de progreso
-        function initializeProgressUI() {
-            toggleProgressElements(true);
-            $('#current-item-info').text('Iniciando importación...');
-            $('#progress-count').text('0');
-            $('#progress-total').text('0');
-            $('#progress-percent').text('0%');
-            showMessage(md_import_force.i18n.importing, 'info');
-        }
-
-        // Inicializar la interfaz de progreso
-        initializeProgressUI();
-
-        // Variable para almacenar el ID del intervalo de consulta de progreso
-        var progressCheckInterval = null;
-        // Variable para controlar si ya se ha procesado una importación completada
-        var importCompletedProcessed = false;
-
-        // Función para actualizar la interfaz con los datos de progreso
-        function updateProgressUI(progressData) {
-            if (!progressData) return;
-
-            // Si ya hemos procesado una importación completada, ignorar actualizaciones adicionales
-            if (importCompletedProcessed && progressData.status === 'completed' && progressData.percent === 100) {
+            const fileInput = document.getElementById('import_file');
+            if (fileInput && fileInput.files.length === 0) {
+                alert('Por favor, selecciona un archivo JSON o ZIP para previsualizar.');
                 return;
             }
 
-            // Verificar si son datos antiguos de una importación anterior completada
-            if (progressData.status === 'completed' && progressData.percent === 100) {
-                var currentTime = new Date().getTime() / 1000;
-                var dataTime = progressData.timestamp || 0;
-                var timeDiff = currentTime - dataTime;
+            previewImportFile(fileInput.files[0]);
+        });
+    }
 
-                // Si han pasado más de 5 segundos, probablemente son datos antiguos
-                if (timeDiff > 5) {
+    // Manejo del formulario de importación
+    const importForm = document.getElementById('md-import-force-form');
+    if (importForm) {
+        importForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            // Guardar el tiempo de inicio de la importación
+            this.dataset.startTime = new Date().getTime() / 1000;
+            window.currentImportId = null; // Variable global para almacenar el ID de la importación actual
+
+            // Verificar si tenemos un archivo para importar
+            if (!previewFilePath) {
+                alert('Por favor, primero previsualiza un archivo antes de importar.');
+                return;
+            }
+
+            const formData = new FormData(this);
+            formData.append('file_path', previewFilePath);
+
+            // Ocultar previsualización y mostrar mensajes/progreso
+            const previewArea = document.getElementById('md-import-force-preview-area');
+            const messagesArea = document.getElementById('md-import-force-messages');
+            
+            if (previewArea) previewArea.style.display = 'none';
+            if (messagesArea) messagesArea.innerHTML = '<p>' + md_import_force.i18n.importing + '</p>';
+            
+            initializeProgressUI();
+
+            let progressCheckInterval = null;
+            let importCompletedProcessed = false;
+
+            apiFetch('import', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (response.success && response.import_id && response.status === 'queued') {
+                    window.currentImportId = response.import_id;
+                    showMessage(response.message, 'info');
+                    progressCheckInterval = setInterval(checkImportProgress, 2000);
+                } else {
+                    showErrorMessage(response.message || md_import_force.i18n.error + ": No se pudo programar la importación.");
+                    toggleProgressElements(false);
+                }
+            })
+            .catch(error => {
+                console.error('Error al iniciar importación (programación):', error.message);
+                showMessage(md_import_force.i18n.error + ': ' + error.message, 'error');
+                toggleProgressElements(false);
+            });
+
+            function initializeProgressUI() {
+                toggleProgressElements(true);
+                document.getElementById('current-item-info').textContent = md_import_force.i18n.importing;
+                document.getElementById('progress-count').textContent = '0';
+                document.getElementById('progress-total').textContent = '0';
+                document.getElementById('progress-percent').textContent = '0%';
+            }
+
+            function checkImportProgress() {
+                if (!window.currentImportId) {
+                    console.warn('checkImportProgress llamado sin currentImportId');
                     return;
                 }
-            }
 
-            // Actualizar la barra de progreso
-            var percent = progressData.percent || 0;
-            $('#md-import-force-progress .progress-bar').width(percent + '%');
-
-            // Actualizar la información del elemento actual
-            if (progressData.current_item) {
-                $('#current-item-info').text(progressData.current_item);
-            }
-
-            // Actualizar los contadores
-            $('#progress-count').text(progressData.current || 0);
-            $('#progress-total').text(progressData.total || 0);
-            $('#progress-percent').text(percent + '%');
-
-            // Si la importación ha terminado, detener las consultas
-            if (progressData.status === 'completed' && percent >= 100) {
-                // Marcar como procesado para evitar procesamiento múltiple
-                importCompletedProcessed = true;
-
-                // Mostrar mensaje de éxito
-                showMessage(md_import_force.i18n.success, 'success');
-
-                // Detener inmediatamente el intervalo de consulta
-                if (progressCheckInterval) {
-                    clearInterval(progressCheckInterval);
-                    progressCheckInterval = null;
-                }
-
-                // Ocultar elementos de progreso
-                toggleProgressElements(false);
-            }
-        }
-
-        // Función para consultar el progreso de la importación
-        function checkImportProgress() {
-            // Usar nuestra función ajaxRequest
-            ajaxRequest({
-                url: md_import_force.ajax_url,
-                type: 'POST',
-                data: {
-                    action: 'md_import_force_check_progress',
-                    nonce: md_import_force.nonce
-                }
-            })
-            .then(function(response) {
-                try {
-                    if (response.success && response.data) {
-                        updateProgressUI(response.data);
-                        // La actualización de la UI ya maneja la finalización de la importación
-                    }
-                } catch (e) {
-                    console.error('Error al procesar respuesta en checkImportProgress:', e);
-                    // No reiniciar el intervalo si hay un error y ya estamos marcados como completados
-                    if (importCompletedProcessed && progressCheckInterval) {
-                        clearInterval(progressCheckInterval);
-                        progressCheckInterval = null;
-                    }
-                }
-            })
-            .catch(function(error) {
-                console.error('Error al consultar progreso:', error);
-            });
-        }
-
-        // Iniciar el intervalo de consulta de progreso (cada 2 segundos para reducir carga del servidor)
-        progressCheckInterval = setInterval(checkImportProgress, 2000);
-
-        // Realizar una primera consulta inmediata para obtener el estado inicial
-        checkImportProgress();
-
-        // Establecer un timeout para verificar el progreso si la solicitud tarda demasiado
-        var importTimeout = setTimeout(function() {
-            // Si después de 300 segundos (5 minutos) no hay respuesta, verificar el estado actual
-            if (!importCompletedProcessed) {
-                // Timeout de importación alcanzado - verificando estado actual
-
-                // Realizar una consulta final de progreso
-                ajaxRequest({
-                    url: md_import_force.ajax_url,
-                    type: 'POST',
-                    data: {
-                        action: 'md_import_force_check_progress',
-                        nonce: md_import_force.nonce
-                    }
+                apiFetch(`progress?import_id=${encodeURIComponent(window.currentImportId)}`, {
+                    method: 'GET'
                 })
-                .then(function(response) {
-                    if (response.success && response.data) {
-                        // Actualizar la UI con los datos de progreso
-                        updateProgressUI(response.data);
-
-                        // Si la importación no está completada, reiniciar el intervalo de consulta
-                        if (response.data.status !== 'completed' && !progressCheckInterval) {
-                            progressCheckInterval = setInterval(checkImportProgress, 2000); // Consultar cada 2 segundos
-                            $('#md-import-force-messages').html('<p>' + md_import_force.i18n.importing + '</p>');
-                        }
-                    } else {
-                        // Si no hay datos de progreso, asumir que la importación se completó
-                        importCompletedProcessed = true;
-                        $('#md-import-force-messages').html('<p style="color: green;">' + md_import_force.i18n.success + '</p>');
-
-                        // Detener el intervalo de consulta y ocultar elementos de progreso
-                        if (progressCheckInterval) {
-                            clearInterval(progressCheckInterval);
-                            progressCheckInterval = null;
-                        }
-                        $('#md-import-force-progress').hide();
-                        $('#md-import-force-current-item').hide();
-                    }
-                })
-                .catch(function() {
-                    // En caso de error, reiniciar el intervalo de consulta si no está activo
-                    if (!progressCheckInterval) {
-                        progressCheckInterval = setInterval(checkImportProgress, 2000);
-                        $('#md-import-force-messages').html('<p>' + md_import_force.i18n.importing + '</p>');
-                    }
-                });
-            }
-        }, 180000); // 180 segundos (3 minutos) - reducido para mejorar la experiencia del usuario
-
-        // Función para finalizar la importación
-        function finalizeImport() {
-            // Limpiar el timeout
-            clearTimeout(importTimeout);
-
-            // Detener el intervalo de consulta de progreso y marcar como completado
-            if (progressCheckInterval) {
-                clearInterval(progressCheckInterval);
-                progressCheckInterval = null;
-            }
-
-            // Marcar como procesado para evitar procesamiento múltiple
-            importCompletedProcessed = true;
-        }
-
-        // Función para procesar la respuesta de importación
-        function processImportResponse(responseText) {
-            var response;
-            try {
-                response = JSON.parse(responseText);
-            } catch (e) {
-                response = responseText;
-            }
-
-            // Ocultar elementos de progreso
-            toggleProgressElements(false);
-
-            return response;
-        }
-
-        // Realizar la solicitud de importación principal
-        var importXhr = new XMLHttpRequest();
-        importXhr.open('POST', md_import_force.ajax_url, true);
-
-        // Configurar el manejo de la finalización (equivalente a complete)
-        importXhr.onloadend = finalizeImport;
-
-        // Configurar el manejo de la respuesta exitosa
-        importXhr.onload = function() {
-            if (importXhr.status >= 200 && importXhr.status < 300) {
-                var response = processImportResponse(importXhr.responseText);
-
-                // Función para procesar la respuesta de importación
-                function handleImportResponse(response) {
-                    try {
-                        // Si la respuesta ya es un objeto
-                        if (typeof response === 'object') {
-                            if (response.success) {
-                                showSuccessMessage(response.data);
-                            } else {
-                                showErrorMessage(response.data);
-                            }
-                            return;
-                        }
-
-                        // Si es una cadena, intentar parsearla como JSON
-                        if (typeof response === 'string') {
-                            // Eliminar cualquier etiqueta progress-update y contenido no JSON
-                            var responseText = response.replace(/<progress-update>[\s\S]*?<\/progress-update>/g, '');
-
-                            // Buscar un objeto JSON válido en la respuesta
-                            var jsonMatch = responseText.match(/({[\s\S]*})/);
-                            if (jsonMatch && jsonMatch[1]) {
-                                responseText = jsonMatch[1];
-                                var jsonResponse = JSON.parse(responseText);
-
-                                if (jsonResponse.success) {
-                                    showSuccessMessage(jsonResponse.data);
-                                } else {
-                                    showErrorMessage(jsonResponse.data);
-                                }
-                                return;
-                            }
-                        }
-
-                        // Si llegamos aquí, no pudimos procesar la respuesta como JSON
-                        // Verificamos si ha pasado suficiente tiempo para asumir que se completó
-                        if (getImportElapsedTime() > 10) {
-                            // Han pasado más de 10 segundos, asumimos que se completó correctamente
-                            showMessage(md_import_force.i18n.success, 'success');
-                        } else {
-                            // Si no ha pasado suficiente tiempo, mostrar mensaje de importación en progreso
-                            showMessage(md_import_force.i18n.importing, 'info');
-                        }
-                    } catch (e) {
-                        console.error('Error al procesar respuesta de importación:', e);
-                        handleImportError(response);
-                    }
-                }
-
-                // Función para manejar errores en la importación
-                function handleImportError(response) {
-                    // Verificar si la importación se completó correctamente a pesar del error
-                    if (typeof response === 'string' && (
-                        response.includes('Importación completada') ||
-                        response.includes('"status":"completed"') ||
-                        response.includes('success') ||
-                        response.includes('La importación se ha realizado con éxito')
-                    )) {
-                        showMessage(md_import_force.i18n.success, 'success');
+                .then(progressData => {
+                    if (importCompletedProcessed && progressData.status === 'completed' && progressData.percent === 100) {
                         return;
                     }
+                    
+                    updateProgressUI(progressData);
 
-                    // Verificar si la importación ha estado en progreso por un tiempo
-                    var timeSinceStart = getImportElapsedTime();
-
-                    if (timeSinceStart > 10) {
-                        // Han pasado más de 10 segundos, asumimos que se completó correctamente
-                        showMessage(md_import_force.i18n.success, 'success');
-                    } else {
-                        // Si no ha pasado suficiente tiempo, mostrar mensaje de importación en progreso
-                        showMessage(md_import_force.i18n.importing, 'info');
-
-                        // Reiniciar el intervalo de consulta de progreso para seguir monitoreando
-                        if (!progressCheckInterval) {
-                            progressCheckInterval = setInterval(checkImportProgress, 2000);
-                        }
+                    if (progressData.status === 'completed' || progressData.status === 'failed' || progressData.status === 'completed_with_errors') {
+                        importCompletedProcessed = true;
+                        clearInterval(progressCheckInterval);
+                        finalizeImport(progressData);
                     }
+                })
+                .catch(error => {
+                    console.error('Error al verificar progreso:', error.message);
+                });
+            }
+
+            function updateProgressUI(progressData) {
+                if (!progressData) return;
+                
+                const progressElement = document.getElementById('md-import-force-progress');
+                const progressBar = progressElement ? progressElement.querySelector('.progress-bar') : null;
+                
+                const progressCountElement = document.getElementById('progress-count');
+                const progressTotalElement = document.getElementById('progress-total');
+                const progressPercentElement = document.getElementById('progress-percent');
+                const currentItemElement = document.getElementById('current-item-info');
+                
+                // Mostrar los elementos de progreso
+                toggleProgressElements(true);
+                
+                let percentComplete = 0;
+                
+                if (progressData && progressData.total && progressData.total > 0) {
+                    percentComplete = Math.round((progressData.current / progressData.total) * 100);
                 }
-
-                // Procesar la respuesta
-                handleImportResponse(response);
+                
+                // Actualizar barra de progreso
+                if (progressBar) {
+                    progressBar.style.width = percentComplete + '%';
+                }
+                
+                // Actualizar textos de progreso
+                if (progressCountElement) progressCountElement.textContent = progressData.current || '0';
+                if (progressTotalElement) progressTotalElement.textContent = progressData.total || '0';
+                if (progressPercentElement) progressPercentElement.textContent = percentComplete + '%';
+                if (currentItemElement) currentItemElement.textContent = progressData.current_item || 'Procesando...';
+                
+                // Actualizar el ID de importación global para que otros scripts puedan acceder a él
+                window.currentImportId = progressData.import_id || null;
+                
+                // Determinar estado de la importación
+                const status = progressData.status || '';
+                
+                // Dispatch custom event for other scripts to respond to progress updates
+                const progressEvent = new CustomEvent('md_import_force_progress_update', {
+                    detail: progressData
+                });
+                document.dispatchEvent(progressEvent);
+                
+                // Handle completion states
+                if (status === 'completed' || status === 'failed' || status === 'stopped') {
+                    finalizeImport(progressData);
+                }
             }
-        }
 
-        // Función para manejar errores de red en la solicitud de importación
-        function handleNetworkError() {
-            console.error('Error en la solicitud de importación');
-
-            // Ocultar elementos de progreso
-            toggleProgressElements(false);
-
-            // Verificar si la importación ha estado en progreso por un tiempo
-            var timeSinceStart = getImportElapsedTime();
-
-            if (timeSinceStart > 10) {
-                // Si ha pasado suficiente tiempo, asumir que la importación se completó
-                showMessage(md_import_force.i18n.success, 'success');
-            } else {
-                // Si no ha pasado suficiente tiempo, mostrar mensaje de error
-                showMessage(md_import_force.i18n.error, 'error');
+            function finalizeImport(progressData) {
+                const elapsedTime = getImportElapsedTime();
+                const elapsedMinutes = Math.floor(elapsedTime / 60);
+                const elapsedSeconds = Math.floor(elapsedTime % 60);
+                
+                let successMessage = md_import_force.i18n.completed + '<br>';
+                successMessage += 'Tiempo total: ' + elapsedMinutes + 'm ' + elapsedSeconds + 's<br>';
+                successMessage += 'Elementos procesados: ' + progressData.processed_count + ' de ' + progressData.total_count;
+                
+                if (progressData.stats) {
+                    successMessage += '<br>Nuevos: ' + (progressData.stats.new_count || 0);
+                    successMessage += ', Actualizados: ' + (progressData.stats.updated_count || 0);
+                    successMessage += ', Omitidos: ' + (progressData.stats.skipped_count || 0);
+                }
+                
+                showMessage(successMessage, 'success');
             }
-        }
+        });
+    }
 
-        // Configurar el manejo de errores
-        importXhr.onerror = handleNetworkError;
-
-        // Enviar la solicitud
-        importXhr.send(formData);
-    });
-
-    // Manejo del botón Actualizar Log
-    $('#md-import-force-refresh-log').on('click', function() {
-        readErrorLog();
-    });
-
-    // Manejo del botón Limpiar Log
-    $('#md-import-force-clear-log').on('click', function() {
-        if (confirm('¿Estás seguro de que quieres limpiar el log de errores? Esta acción no se puede deshacer.')) {
-            clearErrorLog();
-        }
-    });
-
-    // ===== FUNCIONES DE MANEJO DE LOG =====
+    // ===== FUNCIONES DE LOG =====
 
     // Función para actualizar el contenido del log
     function updateLogContent(content) {
-        $('#md-import-force-log-content').text(content);
+        const logContainer = document.getElementById('md-import-force-log-content');
+        if (logContainer) {
+            // Assuming log content should be displayed as plain text within a pre tag
+            const preElement = document.createElement('pre');
+            preElement.textContent = content; // Safely sets text content
+            logContainer.innerHTML = ''; // Clear previous content
+            logContainer.appendChild(preElement);
+        }
     }
 
     // Función para leer el log de errores
     function readErrorLog() {
-        updateLogContent('Cargando log...'); // Mensaje de carga
+        apiFetch('log', {
+            method: 'GET'
+        })
+        .then(response => {
+            // Clear previous messages in the log-specific message area
+            const logMessagesContainer = document.querySelector('#md-import-force-log-messages');
+            if (logMessagesContainer) logMessagesContainer.innerHTML = '';
 
-        ajaxRequest({
-            url: md_import_force.ajax_url,
-            type: 'POST',
-            data: {
-                action: 'md_import_force_read_log',
-                nonce: md_import_force.nonce
-            }
-        })
-        .then(function(response) {
-            if (response.success) {
-                updateLogContent(response.data.log_content || 'El log está vacío.');
+            if (response.success && typeof response.log_content === 'string') {
+                updateLogContent(response.log_content);
+                if (response.log_content.trim() === '' || response.log_content.trim() === md_import_force.i18n.empty_log_message) { // Check against localized empty message too
+                    // md_import_force.i18n.empty_log_message should be defined in wp_localize_script if you use a specific message from PHP for empty log
+                    // For now, let's assume md_import_force.i18n.empty_log_message is 'El log está vacío.'
+                    showMessage(md_import_force.i18n.empty_log_message || 'El log está vacío.', 'info', '#md-import-force-log-messages');
+                }
+            } else if (!response.success && typeof response.log_content === 'string') {
+                // Handle cases where success is false but log_content might contain an error message from the server
+                updateLogContent(response.log_content); // Display the server's message (e.g., "permission denied") in the log area
+                showMessage(response.log_content, 'error', '#md-import-force-log-messages');
             } else {
-                updateLogContent('Error al cargar el log: ' + (response.data.message || 'Error desconocido'));
+                // Generic fallback for other unexpected structures or if response.success is false without a specific message in log_content
+                const message = (response.data && response.data.message) || response.message || 'El log está vacío o no se pudo leer.';
+                updateLogContent(message); // Show message in log area
+                showMessage(message, 'error', '#md-import-force-log-messages'); 
             }
         })
-        .catch(function(error) {
-            updateLogContent('Error en la solicitud AJAX para leer el log: ' + error.statusText);
+        .catch(error => {
+            console.error('Error al leer log:', error.message);
+            const errorMessage = 'Error al leer el log: ' + error.message;
+            updateLogContent(errorMessage);
+            showMessage(errorMessage, 'error', '#md-import-force-log-messages');
         });
     }
 
     // Función para limpiar el log de errores
     function clearErrorLog() {
-        updateLogContent('Limpiando log...'); // Mensaje de limpieza
-
-        ajaxRequest({
-            url: md_import_force.ajax_url,
-            type: 'POST',
-            data: {
-                action: 'md_import_force_clear_log',
-                nonce: md_import_force.nonce
-            }
+        apiFetch('log', {
+            method: 'DELETE'
         })
-        .then(function(response) {
+        .then(response => {
             if (response.success) {
-                updateLogContent('Log limpiado con éxito.');
+                updateLogContent(''); // Clear the visual log display
+                // response.message should come from the PHP backend (handle_rest_clear_log)
+                showMessage(response.message || 'Log limpiado correctamente.', 'success', '#md-import-force-log-messages');
             } else {
-                updateLogContent('Error al limpiar el log: ' + (response.data.message || 'Error desconocido'));
+                const errorMessage = 'Error al limpiar el log: ' + (response.message || (response.data && (response.data.message || response.data.log_content)) || 'Error desconocido');
+                showMessage(errorMessage, 'error', '#md-import-force-log-messages');
             }
         })
-        .catch(function(error) {
-            updateLogContent('Error en la solicitud AJAX para limpiar el log: ' + error.statusText);
+        .catch(error => {
+            const errorMessage = 'Error al limpiar el log: ' + error.message;
+            showMessage(errorMessage, 'error', '#md-import-force-log-messages');
         });
     }
 
-    // ===== FUNCIONES DE LIMPIEZA DE ARCHIVOS =====
+    // Botón de limpiar log
+    const clearLogButton = document.getElementById('md-import-force-clear-log');
+    if (clearLogButton) {
+        clearLogButton.addEventListener('click', function(e) {
+            e.preventDefault();
+            clearErrorLog();
+        });
+    }
 
-    // Función para actualizar el resultado de la limpieza (usa showMessage con target específico)
+    // ===== FUNCIONES DE LIMPIEZA =====
+
+    // Función para actualizar el resultado de limpieza
     function updateCleanupResult(message, type) {
-        showMessage(message, type, '#md-import-force-cleanup-result');
+        showMessage(message, type, '#md-import-force-cleanup-message');
     }
 
-    // Función para realizar la limpieza de archivos
+    // Función para limpiar archivos
     function cleanupFiles(hours) {
-        updateCleanupResult('Limpiando archivos antiguos...', 'info');
+        const formData = new FormData();
+        formData.append('hours', hours);
 
-        ajaxRequest({
-            url: md_import_force.ajax_url,
-            type: 'POST',
-            data: {
-                action: 'md_import_force_cleanup_all',
-                nonce: md_import_force.nonce,
-                hours: hours
-            }
+        apiFetch('cleanup', {
+            method: 'POST',
+            body: formData
         })
-        .then(function(response) {
+        .then(response => {
             if (response.success) {
-                updateCleanupResult(response.data.message, 'success');
+                updateCleanupResult(response.message, 'success');
             } else {
-                updateCleanupResult('Error: ' + (response.data.message || 'Error desconocido'), 'error');
+                updateCleanupResult(response.message || 'Error al limpiar archivos', 'error');
             }
         })
-        .catch(function(error) {
-            updateCleanupResult('Error en la solicitud AJAX: ' + error.statusText, 'error');
+        .catch(error => {
+            console.error('Error al limpiar archivos:', error.message);
+            updateCleanupResult('Error al limpiar archivos: ' + error.message, 'error');
         });
     }
 
-    // Manejo del botón de limpieza de archivos
-    $('#md-import-force-cleanup-all').on('click', function() {
-        if (confirm('¿Estás seguro de que quieres eliminar los archivos de importación antiguos? Esta acción no se puede deshacer.')) {
-            var hours = $('#cleanup_hours').val();
+    // Botón de limpieza
+    const cleanupButton = document.getElementById('md-import-force-cleanup-button');
+    if (cleanupButton) {
+        cleanupButton.addEventListener('click', function(e) {
+            e.preventDefault();
+            const hoursInput = document.getElementById('md-import-force-cleanup-hours');
+            const hours = hoursInput ? parseInt(hoursInput.value) : 24;
+            
+            if (isNaN(hours) || hours < 1) {
+                alert('Por favor, introduce un número válido de horas (mínimo 1).');
+                return;
+            }
+            
             cleanupFiles(hours);
-        }
-    });
+        });
+    }
 
-    // Función auxiliar para calcular el tiempo transcurrido desde el inicio de la importación
-    // Utilizada para determinar si una importación ha estado en progreso el tiempo suficiente
-    // para considerarla completada en caso de errores o respuestas inesperadas
+    // ===== UTILIDADES =====
+
+    // Función para obtener el tiempo transcurrido desde el inicio de la importación
     function getImportElapsedTime() {
-        var currentTime = new Date().getTime() / 1000;
-        var startTime = $('#md-import-force-form').data('start-time') || currentTime;
+        const importForm = document.getElementById('md-import-force-form');
+        if (!importForm || !importForm.dataset.startTime) {
+            return 0;
+        }
+        
+        const startTime = parseFloat(importForm.dataset.startTime);
+        const currentTime = new Date().getTime() / 1000;
         return currentTime - startTime;
     }
 
+    // Activar la primera pestaña por defecto
+    const defaultTab = document.querySelector('.nav-tab-wrapper a');
+    if (defaultTab) {
+        const tabName = defaultTab.getAttribute('data-tab');
+        switchTab(tabName);
+    }
 });

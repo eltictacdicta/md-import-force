@@ -47,6 +47,11 @@ if (!defined('ABSPATH')) {
                 <div id="md-import-force-preview-content"></div>
             </div>
 
+            <!-- Contenedor para el botón de detener importaciones -->
+            <div id="md-import-controls-container" class="md-import-controls-container" style="margin-top: 20px; margin-bottom: 20px;">
+                <!-- El botón de "Parar Todas las Importaciones" se insertará aquí vía JavaScript -->
+            </div>
+
             <div id="md-import-force-current-item" class="md-import-force-current-item" style="display: none;">
                 <div class="current-item-title"><?php _e('Importando:', 'md-import-force'); ?> <span id="current-item-info">Preparando importación...</span></div>
                 <div class="progress-stats">
@@ -60,12 +65,11 @@ if (!defined('ABSPATH')) {
             </div>
         </div>
 
-
-
         <div id="tab-log" class="tab-content" style="display: none;">
             <h2><?php _e('Log de Errores de PHP', 'md-import-force'); ?></h2>
             <button type="button" class="button button-secondary" id="md-import-force-refresh-log"><?php _e('Actualizar Log', 'md-import-force'); ?></button>
             <button type="button" class="button button-secondary" id="md-import-force-clear-log"><?php _e('Limpiar Log', 'md-import-force'); ?></button>
+            <div id="md-import-force-log-messages" class="md-import-force-messages"></div>
             <pre id="md-import-force-log-content" style="background-color: #f1f1f1; padding: 10px; border: 1px solid #ccc; max-height: 500px; overflow-y: scroll; white-space: pre-wrap; word-wrap: break-word;"></pre>
         </div>
 
