@@ -27,6 +27,7 @@ require_once(dirname(__FILE__) . '/class-md-import-force-media-handler.php');
 require_once(dirname(__FILE__) . '/class-md-import-force-comment-importer.php');
 require_once(dirname(__FILE__) . '/class-md-import-force-progress-tracker.php');
 require_once(dirname(__FILE__) . '/class-md-import-force-skipped-items-tracker.php');
+require_once(dirname(__FILE__) . '/class-md-import-force-media-queue-manager.php');
 
 class MD_Import_Force_Handler {
 
@@ -89,14 +90,47 @@ class MD_Import_Force_Handler {
             $posts_data = $data_to_preview['posts'];
             MD_Import_Force_Logger::log_message("MD Import Force [DEBUG PREVIEW]: Datos de sitio y posts extraídos.");
 
-            $preview_records = array_slice($posts_data, 0, 10);
+            $all_posts_in_file = $posts_data;
+            $missing_posts = [];
+            $existing_posts_in_file_count = 0;
 
-            MD_Import_Force_Logger::log_message("MD Import Force [DEBUG PREVIEW]: Previsualización generada con éxito.");
+            foreach ($all_posts_in_file as $record) {
+                $existing_post = get_page_by_title(html_entity_decode($record['post_title']), OBJECT, $record['post_type']);
+                $is_existing = ($existing_post !== null && $existing_post->post_status !== 'trash');
+                
+                if (!$is_existing) {
+                    $record['already_exists'] = false; // Aunque solo mostraremos los que faltan, mantenemos la clave por consistencia
+                    $missing_posts[] = $record;
+                } else {
+                    $existing_posts_in_file_count++;
+                }
+            }
+
+            $preview_records = array_slice($missing_posts, 0, 50); // Tomamos los primeros 50 de los que FALTAN
+            $total_missing_in_file = count($missing_posts);
+
+            // Extract IDs of missing posts to potentially use in 'import only missing'
+            $missing_post_ids = array_map(function($post) {
+                return $post['ID']; // Assuming 'ID' is the original ID from the import file
+            }, $missing_posts);
+
+            if (!empty($missing_post_ids)) {
+                set_transient('mdif_missing_ids_' . md5($file_path), $missing_post_ids, HOUR_IN_SECONDS * 2); // Store for 2 hours
+                MD_Import_Force_Logger::log_message("MD Import Force [DEBUG PREVIEW]: Stored " . count($missing_post_ids) . " missing post IDs in transient for file hash: " . md5($file_path));
+            } else {
+                // Ensure any old transient for this file is cleared if no missing posts are found now
+                delete_transient('mdif_missing_ids_' . md5($file_path));
+                MD_Import_Force_Logger::log_message("MD Import Force [DEBUG PREVIEW]: No missing posts found or IDs array empty. Cleared any existing transient for file hash: " . md5($file_path));
+            }
+
+            MD_Import_Force_Logger::log_message("MD Import Force [DEBUG PREVIEW]: Previsualización generada con éxito. Faltantes en archivo: " . $total_missing_in_file);
             return array(
                 'success' => true,
                 'site_info' => $source_site_info,
-                'total_records' => count($posts_data),
-                'preview_records' => $preview_records,
+                'total_records_in_file' => count($all_posts_in_file), // Total original en el archivo
+                'total_missing_in_file' => $total_missing_in_file, // Total de los que realmente faltan
+                'total_existing_in_file' => $existing_posts_in_file_count, // Total de los que ya existen en el archivo
+                'preview_records' => $preview_records, // Los primeros 50 de los que faltan
                 'file_path' => $file_path,
                 'message' => __('Previsualización generada con éxito.', 'md-import-force')
             );
@@ -113,8 +147,23 @@ class MD_Import_Force_Handler {
      * @param array $options Opciones de importación.
      * @return array Resultado de la importación con estadísticas.
      */
-    public function start_import($import_id, $options = []) {
-        MD_Import_Force_Logger::log_message("MD Import Force [HANDLER START_IMPORT]: Iniciando para import_id: {$import_id}");
+    public function start_import($import_id, $options = array()) {
+        MD_Import_Force_Logger::log_message("MD Import Force [DEBUG HANDLER START_IMPORT]: Entrando en Handler::start_import. Import ID: {$import_id}, Opciones: " . json_encode($options));
+
+        MD_Import_Force_Logger::log_message("MD Import Force [HANDLER START_IMPORT]: Iniciando proceso de importación para import_id: {$import_id}");
+        
+        // Registrar las opciones recibidas para diagnóstico
+        $import_only_missing = isset($options['import_only_missing']) && $options['import_only_missing'] ? 'SÍ' : 'NO';
+        MD_Import_Force_Logger::log_message("MD Import Force [HANDLER START_IMPORT OPTIONS]: Opción import_only_missing: {$import_only_missing}");
+        
+        // >>> INICIO: Limpiar banderas de detención existentes <<<
+        // Limpiar la bandera global de detención
+        delete_option('md_import_force_stop_all_imports_requested');
+        // Limpiar cualquier transient específico para este import_id que pudiera quedar de una ejecución anterior
+        delete_transient('md_import_force_stop_request_' . $import_id);
+        MD_Import_Force_Logger::log_message("MD Import Force [HANDLER START_IMPORT]: Banderas de detención limpiadas para import_id: {$import_id}");
+        // >>> FIN: Limpiar banderas de detención existentes <<<
+        
         MD_Import_Force_Progress_Tracker::update_status($import_id, 'processing', __('Leyendo archivo de importación...', 'md-import-force'));
 
         $this->skipped_items_tracker->clear();
@@ -147,6 +196,37 @@ class MD_Import_Force_Handler {
             $import_data = $this->read_import_file($import_id);
             MD_Import_Force_Logger::log_message("MD Import Force [HANDLER START_IMPORT]: Archivo {$import_id} leído.");
 
+            // >>> INICIO: Optimización para "Importar solo faltantes" usando IDs de previsualización
+            $original_posts_count_before_filter = 0;
+            if (isset($options['import_only_missing']) && $options['import_only_missing']) {
+                $missing_post_ids_from_preview = get_transient('mdif_missing_ids_' . md5($import_id));
+
+                if ($missing_post_ids_from_preview && is_array($missing_post_ids_from_preview) && !empty($missing_post_ids_from_preview)) {
+                    MD_Import_Force_Logger::log_message("MD Import Force [HANDLER START_IMPORT]: Opción 'solo faltantes' activa. Se encontraron " . count($missing_post_ids_from_preview) . " IDs de posts faltantes en transient para {$import_id}. Filtrando posts...");
+
+                    $filter_function = function($post) use ($missing_post_ids_from_preview) {
+                        return isset($post['ID']) && in_array($post['ID'], $missing_post_ids_from_preview);
+                    };
+
+                    if (is_array($import_data) && isset($import_data[0])) { // ZIP con múltiples archivos
+                        foreach ($import_data as &$single_file_data_ref) { // Usar referencia para modificar el array original
+                            if (isset($single_file_data_ref['posts']) && is_array($single_file_data_ref['posts'])) {
+                                $original_posts_count_before_filter += count($single_file_data_ref['posts']);
+                                $single_file_data_ref['posts'] = array_filter($single_file_data_ref['posts'], $filter_function);
+                            }
+                        }
+                        unset($single_file_data_ref); // Romper la referencia
+                    } elseif (isset($import_data['posts']) && is_array($import_data['posts'])) { // Archivo JSON único
+                        $original_posts_count_before_filter = count($import_data['posts']);
+                        $import_data['posts'] = array_filter($import_data['posts'], $filter_function);
+                    }
+                    MD_Import_Force_Logger::log_message("MD Import Force [HANDLER START_IMPORT]: Posts filtrados según IDs de previsualización.");
+                } else {
+                    MD_Import_Force_Logger::log_message("MD Import Force [HANDLER START_IMPORT]: Opción 'solo faltantes' activa, pero no se encontraron IDs en transient (o estaba vacío) para {$import_id}. Se procederá con la lógica de omisión estándar dentro del importador.");
+                }
+            }
+            // >>> FIN: Optimización
+
             $overall_total_posts_in_file = 0;
             $overall_processed_count = 0;
             $overall_new_count = 0;
@@ -161,6 +241,12 @@ class MD_Import_Force_Handler {
                 }
             } elseif (isset($import_data['posts'])) {
                 $overall_total_posts_in_file = count($import_data['posts']);
+            }
+
+            if (isset($options['import_only_missing']) && $options['import_only_missing'] && $original_posts_count_before_filter > 0) {
+                 MD_Import_Force_Logger::log_message("MD Import Force [HANDLER START_IMPORT]: Recalculado overall_total_posts_in_file DESPUÉS de filtro 'solo faltantes': " . $overall_total_posts_in_file . " (originalmente eran " . $original_posts_count_before_filter . " antes de filtrar, si se aplicó filtro). Import ID: " . $import_id);
+            } else {
+                 MD_Import_Force_Logger::log_message("MD Import Force [HANDLER START_IMPORT]: Calculado overall_total_posts_in_file: " . $overall_total_posts_in_file . " para import_id: " . $import_id);
             }
             
             MD_Import_Force_Progress_Tracker::update_progress(
@@ -507,15 +593,16 @@ class MD_Import_Force_Handler {
      * 
      * @param string $import_id ID de la importación
      * @param array $options Opciones de importación
-     * @param array $import_data Datos de importación completos
-     * @param int $start_index Índice de inicio del lote
+     * @param array $import_data Datos de importación completos (para este lote, o el archivo de datos temporal)
+     * @param int $start_index Índice de inicio del lote DENTRO de $import_data['posts'] (o estructura similar si es ZIP)
      * @param int $batch_size Tamaño del lote
-     * @param int &$current_processed_count Contador actual de elementos procesados (referencia)
-     * @param int $total_items Total de elementos a procesar
+     * @param int &$current_processed_count Contador actual de elementos procesados (referencia global para esta fase de posts)
+     * @param int $total_items Total de elementos a procesar (en esta fase de posts)
+     * @param string $import_run_guid GUID único para toda la ejecución de esta importación
      * @return array Resultado del procesamiento del lote
      */
-    public function process_batch($import_id, $options, $import_data, $start_index, $batch_size, &$current_processed_count, $total_items) {
-        MD_Import_Force_Logger::log_message("MD Import Force [HANDLER BATCH]: Procesando lote para import_id: {$import_id}, inicio: {$start_index}, tamaño: {$batch_size}");
+    public function process_batch($import_id, $options, $import_data, $start_index, $batch_size, &$current_processed_count, $total_items, $import_run_guid) {
+        MD_Import_Force_Logger::log_message("MD Import Force [HANDLER BATCH]: Procesando lote para import_id: {$import_id}, GUID: {$import_run_guid}, inicio: {$start_index}, tamaño: {$batch_size}");
         
         // Verificar si se ha solicitado detener las importaciones (global o específica)
         if (get_option('md_import_force_stop_all_imports_requested', false) || get_transient('md_import_force_stop_request_' . $import_id)) {
@@ -601,13 +688,33 @@ class MD_Import_Force_Handler {
                 $total_items
             );
             
+            // --- INICIO: Guardar referencias de medios en la cola ---
+            if (isset($batch_result['media_references']) && is_array($batch_result['media_references'])) {
+                $media_refs_count = count($batch_result['media_references']);
+                if ($media_refs_count > 0) {
+                    MD_Import_Force_Logger::log_message("MD Import Force [HANDLER BATCH]: Se encontraron {$media_refs_count} referencias de medios para GUID: {$import_run_guid}, Lote con inicio: {$start_index}. Guardando en cola...");
+                    foreach ($batch_result['media_references'] as $ref) {
+                        MD_Import_Force_Media_Queue_Manager::add_item(
+                            $import_run_guid,
+                            $ref['post_id'],
+                            $ref['original_post_id_from_file'],
+                            $ref['media_type'],
+                            $ref['original_url']
+                        );
+                    }
+                }
+            }
+            // --- FIN: Guardar referencias de medios en la cola ---
+
             $batch_new_count = $batch_result['new_count'] ?? 0;
             $batch_updated_count = $batch_result['updated_count'] ?? 0;
             $batch_skipped_count = $batch_result['skipped_count'] ?? 0;
             
         } else {
-            // Caso más simple: un solo archivo JSON
-            // Obtener el subconjunto de elementos a procesar en este lote
+            // Caso más simple: un solo archivo JSON (ya no debería ser manejado directamente por process_batch si JobManager siempre guarda en $data_id)
+            // Esta lógica probablemente se simplificará o se moverá si JobManager SIEMPRE usa un archivo de datos temporal.
+            // Por ahora, asumimos que $import_data aquí es el contenido del archivo temporal, que es un array de posts.
+
             $batch_items = array_slice($import_data['posts'], $start_index, $batch_size);
             
             // Configurar el importer con la información del sitio de origen
@@ -629,6 +736,24 @@ class MD_Import_Force_Handler {
                 $current_processed_count, // Referencia que será actualizada por import_posts
                 $total_items
             );
+
+            // --- INICIO: Guardar referencias de medios en la cola (para el caso de JSON único) ---
+            if (isset($batch_result['media_references']) && is_array($batch_result['media_references'])) {
+                $media_refs_count = count($batch_result['media_references']);
+                if ($media_refs_count > 0) {
+                    MD_Import_Force_Logger::log_message("MD Import Force [HANDLER BATCH - JSON Único]: Se encontraron {$media_refs_count} referencias de medios para GUID: {$import_run_guid}. Guardando en cola...");
+                    foreach ($batch_result['media_references'] as $ref) {
+                        MD_Import_Force_Media_Queue_Manager::add_item(
+                            $import_run_guid,
+                            $ref['post_id'],
+                            $ref['original_post_id_from_file'],
+                            $ref['media_type'],
+                            $ref['original_url']
+                        );
+                    }
+                }
+            }
+            // --- FIN: Guardar referencias de medios en la cola ---
             
             $batch_new_count = $batch_result['new_count'] ?? 0;
             $batch_updated_count = $batch_result['updated_count'] ?? 0;

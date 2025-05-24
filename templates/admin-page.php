@@ -29,6 +29,14 @@ if (!defined('ABSPATH')) {
 
                     <p class="description"><?php _e('Selecciona un archivo .ZIP o .JSON para importar', 'md-import-force'); ?></p>
 
+                    <div class="form-field" id="md-import-force-options-wrapper" style="display: none; margin-top: 15px; margin-bottom: 15px; padding: 10px; border: 1px solid #e0e0e0; background-color: #f9f9f9;">
+                        <label for="import_only_missing">
+                            <input type="checkbox" id="import_only_missing" name="import_only_missing" value="1">
+                            <?php _e('Importar solo los posts que faltan (omitir los que ya existen por título y tipo)', 'md-import-force'); ?>
+                        </label>
+                        <p class="description"><?php _e('Útil si una importación anterior fue parcial o si quieres asegurarte de no duplicar contenido ya existente.', 'md-import-force'); ?></p>
+                    </div>
+
                     <div class="submit-button">
                         <button type="submit" class="button button-primary" id="md-import-force-import-button">
                             <?php _e('Importar', 'md-import-force'); ?>

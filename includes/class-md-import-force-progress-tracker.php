@@ -333,6 +333,36 @@ class MD_Import_Force_Progress_Tracker {
         ];
     }
 
+    /**
+     * Crea la tabla de progreso si no existe o la actualiza si es necesario.
+     */
+    public static function create_progress_table_if_needed() {
+        global $wpdb;
+        
+        $table_name = $wpdb->prefix . 'mdif_progress';
+        
+        $charset_collate = $wpdb->get_charset_collate();
+
+        $sql = "CREATE TABLE $table_name (
+            id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+            import_id varchar(255) NOT NULL,
+            status varchar(50) NOT NULL DEFAULT 'queued',
+            processed_count int(11) NOT NULL DEFAULT 0,
+            total_count int(11) NOT NULL DEFAULT 0,
+            percent int(3) NOT NULL DEFAULT 0,
+            current_item_message text NOT NULL,
+            details longtext,
+            stats longtext,
+            timestamp datetime NOT NULL,
+            start_time datetime NOT NULL,
+            end_time datetime,
+            PRIMARY KEY  (id),
+            KEY import_id (import_id)
+        ) $charset_collate;";
+
+        require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+        dbDelta( $sql );
+    }
 
     /*
     // ---- Old instance-based methods and constructor ----

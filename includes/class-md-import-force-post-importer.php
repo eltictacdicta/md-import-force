@@ -76,8 +76,9 @@ class MD_Import_Force_Post_Importer {
         $updated_count_local = 0; 
         $skipped_count_local = 0;
         $total_items_in_this_batch = count($items_data);
+        $media_references_for_queue = []; // Array para recopilar todas las referencias de medios de esta tanda
         
-        MD_Import_Force_Logger::log_message("MD Import Force [POST_IMPORTER]: Iniciando procesamiento de {$total_items_in_this_batch} posts para import_id: {$import_id}. Avance global actual: {$overall_processed_count_ref}/{$overall_total_items_in_file}");
+        MD_Import_Force_Logger::log_message("MD Import Force [POST_IMPORTER]: Iniciando procesamiento de {$total_items_in_this_batch} posts para import_id: {$import_id}. Avance global actual: {$overall_processed_count_ref}/{$overall_total_items_in_file}. Total global esperado: {$overall_total_items_in_file}");
 
         // Limpiar el rastreador de elementos omitidos para esta tanda (si se quiere por tanda, o globalmente en Handler)
         // Si es global, el Handler lo gestiona. Si es por tanda (ej. por JSON en un ZIP), aquí.
@@ -89,6 +90,42 @@ class MD_Import_Force_Post_Importer {
         foreach ($items_data as $item_data) {
             $overall_processed_count_ref++; // Incrementar el contador global de procesados
             
+            $original_id = $item_data['ID'] ?? 'N/A';
+            $title = $item_data['post_title'] ?? '[Sin Título]';
+            $type = $item_data['post_type'] ?? 'post';
+
+            // >>> INICIO: Lógica para importar solo faltantes <<<
+            if (isset($options['import_only_missing']) && ($options['import_only_missing'] === true || $options['import_only_missing'] === '1' || $options['import_only_missing'] === 1)) {
+                // Loguear el valor exacto para diagnóstico
+                $option_value = var_export($options['import_only_missing'], true);
+                MD_Import_Force_Logger::log_message("MD Import Force [POST_IMPORTER]: Opción import_only_missing activada con valor: {$option_value}");
+                
+                $existing_post_check = get_page_by_title(html_entity_decode($title), OBJECT, $type);
+                if ($existing_post_check !== null && $existing_post_check->post_status !== 'trash') {
+                    $skipped_count_local++;
+                    $reason = __('Omitido: El post ya existe (opción importar solo faltantes activa)', 'md-import-force');
+                    $this->skipped_items_tracker->add_skipped_item($original_id, $title, $type, $reason);
+                    MD_Import_Force_Logger::log_message("MD Import Force [SKIP POST - ONLY MISSING]: Post ID {$original_id} ('{$title}') omitido porque ya existe.");
+                    
+                    // Actualizar progreso para este item omitido
+                    $current_item_message_skipped = sprintf(__('Omitido (%d/%d): %s ID %s (%s) - Ya existe', 'md-import-force'),
+                        $overall_processed_count_ref,
+                        $overall_total_items_in_file,
+                        $type,
+                        $original_id,
+                        $title
+                    );
+                    MD_Import_Force_Progress_Tracker::update_progress(
+                        $import_id,
+                        $overall_processed_count_ref,
+                        $overall_total_items_in_file,
+                        $current_item_message_skipped
+                    );
+                    continue; // Saltar al siguiente item
+                }
+            }
+            // >>> FIN: Lógica para importar solo faltantes <<<
+
             // Verificar si se ha solicitado detener las importaciones (global o específica)
             if (get_option('md_import_force_stop_all_imports_requested', false) || get_transient('md_import_force_stop_request_' . $import_id)) {
                 $stop_reason = get_transient('md_import_force_stop_request_' . $import_id) 
@@ -116,15 +153,11 @@ class MD_Import_Force_Post_Importer {
                 ];
             }
 
-            $id = $item_data['ID'] ?? 'N/A';
-            $title = $item_data['post_title'] ?? '[Sin Título]';
-            $type = $item_data['post_type'] ?? 'post';
-
             $current_item_message = sprintf(__('Procesando (%d/%d): %s ID %s (%s)', 'md-import-force'),
                 $overall_processed_count_ref,
                 $overall_total_items_in_file,
                 $type,
-                $id,
+                $original_id,
                 $title
             );
             MD_Import_Force_Progress_Tracker::update_progress(
@@ -135,14 +168,21 @@ class MD_Import_Force_Post_Importer {
             );
 
             try {
-                $res = $this->process_post_item($item_data); // $options se podrían pasar aquí si process_post_item los necesita
+                // Modificado: process_post_item ahora también devuelve las referencias de medios para el post actual
+                $result_array = $this->process_post_item($item_data, $options); // $options se pasan aquí
+                $res = $result_array['status'];
+                
+                if (isset($result_array['media_references']) && !empty($result_array['media_references'])) {
+                    $media_references_for_queue = array_merge($media_references_for_queue, $result_array['media_references']);
+                }
+
                 if ($res === 'imported') $new_count_local++;
                 elseif ($res === 'updated') $updated_count_local++;
                 else $skipped_count_local++;
             } catch (Exception $e) {
-                MD_Import_Force_Logger::log_message("MD Import Force [POST_IMPORTER ERROR] Post/Página ID {$id} ('{$title}') para import_id {$import_id}: " . $e->getMessage());
+                MD_Import_Force_Logger::log_message("MD Import Force [POST_IMPORTER ERROR] Post/Página ID {$original_id} ('{$title}') para import_id {$import_id}: " . $e->getMessage());
                 $skipped_count_local++;
-                $this->skipped_items_tracker->add_skipped_item($id, $title, $type, $e->getMessage());
+                $this->skipped_items_tracker->add_skipped_item($original_id, $title, $type, $e->getMessage());
             }
             // No wp_cache_flush o gc_collect_cycles aquí para no ralentizar el proceso en segundo plano.
             // El Handler puede hacer un flush al final de todo el job si es necesario.
@@ -165,7 +205,7 @@ class MD_Import_Force_Post_Importer {
             'new_count' => $new_count_local,
             'updated_count' => $updated_count_local,
             'skipped_count' => $skipped_count_local,
-            // 'skipped_items' => $this->skipped_items_tracker->get_skipped_items_for_current_batch(), // Si el tracker lo soportara
+            'media_references' => $media_references_for_queue, // Devolver las referencias de medios recopiladas
             'message' => $msg
             // No devolver 'skipped_items' aquí directamente, el Handler lo recuperará de $this->skipped_items_tracker globalmente si es necesario
             // o lo acumulará a partir de los errores y skips que logueamos y contamos.
@@ -173,26 +213,66 @@ class MD_Import_Force_Post_Importer {
     }
 
     /**
-     * Procesa un único post/página.
+     * Extrae todas las URLs de imágenes únicas del contenido HTML.
+     *
+     * @param string $content Contenido HTML.
+     * @return array Array de URLs de imágenes únicas.
      */
-    private function process_post_item($item_data) {
+    private function extract_image_urls_from_content($content) {
+        $image_urls = [];
+        if (empty($content)) {
+            return $image_urls;
+        }
+
+        if (class_exists('DOMDocument')) {
+            $doc = new DOMDocument();
+            @$doc->loadHTML('<?xml encoding="utf-8" ?><html><body>' . $content . '</body></html>'); // Suppress warnings for malformed HTML
+            libxml_clear_errors(); 
+
+            $img_tags = $doc->getElementsByTagName('img');
+            foreach ($img_tags as $img) {
+                $src = $img->getAttribute('src');
+                if (!empty($src)) {
+                    $image_urls[] = trim($src);
+                }
+            }
+        } else {
+            // Fallback a regex si DOMDocument no está disponible (menos robusto)
+            // Corrected Regex for PHP single-quoted string:
+            preg_match_all('/<img[^>]+src\s*=\s*([\'"])(.*?)\1[^>]*>/i', $content, $matches);
+            if (!empty($matches[2])) { // Match group 2 contains the URL
+                foreach ($matches[2] as $src) {
+                    $image_urls[] = trim($src);
+                }
+            }
+        }
+        
+        return array_unique($image_urls);
+    }
+
+    /**
+     * Procesa un único post/página.
+     * Devuelve un array con el estado y las referencias de medios.
+     */
+    private function process_post_item($item_data, $options = []) {
         $id = intval($item_data['ID'] ?? 0);
         $title = $item_data['post_title'] ?? '[Sin Título]';
         $type = $item_data['post_type'] ?? 'post';
+        $current_post_media_references = []; // Referencias de medios para ESTE post
 
         // Omitir directamente los elementos de tipo oembed_cache
         if ($type === 'oembed_cache') {
             $reason = "Tipo 'oembed_cache' omitido por configuración";
             MD_Import_Force_Logger::log_message("MD Import Force [SKIP] Post ID {$id}: {$reason}.");
             $this->skipped_items_tracker->add_skipped_item($id, $title, $type, $reason);
-            return 'skipped';
+            return ['status' => 'skipped', 'media_references' => $current_post_media_references];
         }
 
         if ($id <= 0) {
             $reason = "ID inválido";
             MD_Import_Force_Logger::log_message("MD Import Force [SKIP] Post ID {$id}: {$reason}.");
             $this->skipped_items_tracker->add_skipped_item($id, $title, $type, $reason);
-            return 'skipped';
+            return ['status' => 'skipped', 'media_references' => $current_post_media_references];
         }
 
         // Preparar datos del post
@@ -226,66 +306,123 @@ class MD_Import_Force_Post_Importer {
                 $reason = "Tipo existente '{$existing->post_type}' != Importado '{$type}'";
                 MD_Import_Force_Logger::log_message("MD Import Force [CONFLICT/SKIP] Post ID {$id}: {$reason}.");
                 $this->skipped_items_tracker->add_skipped_item($id, $title, $type, $reason);
-                return 'skipped';
+                return ['status' => 'skipped', 'media_references' => $current_post_media_references];
             }
         } else {
             $item_arr['import_id'] = $id;
             $action = 'insert';
         }
 
+        // Ensure 'force_ids' option is respected for inserts
+        if ($action === 'insert' && !(isset($options['force_ids']) && $options['force_ids'])) {
+            // If not forcing IDs, remove import_id to let WP generate a new ID
+            unset($item_arr['import_id']);
+        }
+
         $result_id = wp_insert_post($item_arr, true);
 
         if (is_wp_error($result_id)) {
-             if ($action === 'insert' && $result_id->get_error_code() === 'invalid_post_id') {
-                 MD_Import_Force_Logger::log_message("MD Import Force [WARN] Post ID {$id}: Falló inserción ('invalid_post_id'), reintentando como update.");
-                 $item_arr['ID'] = $id; unset($item_arr['import_id']); $result_id = wp_insert_post($item_arr, true);
-                 if (!is_wp_error($result_id)) $action = 'update';
-                 else {
-                     $reason = "Falló update fallback: " . $result_id->get_error_message();
-                     MD_Import_Force_Logger::log_message("MD Import Force [ERROR] Post ID {$id}: {$reason}");
-                     $this->skipped_items_tracker->add_skipped_item($id, $title, $type, $reason);
-                     return 'skipped';
+             if ($action === 'insert' && $result_id->get_error_code() === 'invalid_post_id' && isset($item_arr['import_id'])) {
+                 // This case implies an attempt to insert with an ID that already exists,
+                 // or some other ID-related insertion issue when import_id was set.
+                 // If force_ids was true, we might want to retry as an update if the post truly exists with that ID.
+                 MD_Import_Force_Logger::log_message("MD Import Force [WARN] Post ID {$id}: Falló inserción con import_id ('invalid_post_id'), verificando si existe para reintentar como update.");
+                 $existing_check = get_post($id);
+                 if ($existing_check && $existing_check->post_type === $type) {
+                     $item_arr['ID'] = $id; 
+                     unset($item_arr['import_id']); 
+                     $result_id = wp_insert_post($item_arr, true);
+                     if (!is_wp_error($result_id)) {
+                        $action = 'update'; // Successfully updated
+                     } else {
+                        $reason = "Falló update tras fallo de insert con ID: " . $result_id->get_error_message();
+                        MD_Import_Force_Logger::log_message("MD Import Force [ERROR] Post ID {$id}: {$reason}");
+                        $this->skipped_items_tracker->add_skipped_item($id, $title, $type, $reason);
+                        return ['status' => 'skipped', 'media_references' => $current_post_media_references];
+                     }
+                 } else {
+                    $reason = "Falló inserción con ID {$id} ('invalid_post_id') y el post no existe o es de tipo incorrecto para update.";
+                    MD_Import_Force_Logger::log_message("MD Import Force [ERROR] Post ID {$id}: {$reason} - Detalle: " . $result_id->get_error_message());
+                    $this->skipped_items_tracker->add_skipped_item($id, $title, $type, $reason . " - " . $result_id->get_error_message());
+                    return ['status' => 'skipped', 'media_references' => $current_post_media_references];
                  }
-             } elseif (is_wp_error($result_id)) throw new Exception("Error {$action} Post ID {$id}: " . $result_id->get_error_message());
+
+             } else { // Other wp_insert_post errors
+                 $reason = "Error en {$action} para Post ID {$id}: " . $result_id->get_error_message();
+                 MD_Import_Force_Logger::log_message("MD Import Force [ERROR] {$reason}");
+                 $this->skipped_items_tracker->add_skipped_item($id, $title, $type, $reason);
+                 // throw new Exception($reason); // Or return skipped
+                 return ['status' => 'skipped', 'media_references' => $current_post_media_references];
+             }
         }
 
         $processed_id = $result_id;
 
-        if ($processed_id != $id) {
-            $reason = "ID procesado {$processed_id} != ID original. Omitiendo post-procesado.";
-            MD_Import_Force_Logger::log_message("MD Import Force [WARN] Post ID {$id}: {$reason}");
+        // If forcing IDs, and the resulting ID doesn't match, this is an issue.
+        if (isset($options['force_ids']) && $options['force_ids'] && $processed_id != $id) {
+            $reason = "ID procesado {$processed_id} != ID original {$id} con force_ids activo. Esto no debería ocurrir si wp_insert_post funcionó como se esperaba.";
+            MD_Import_Force_Logger::log_message("MD Import Force [CRITICAL WARN] Post ID {$id}: {$reason}");
+            // This might be a critical state, decide if to skip or flag heavily
             $this->skipped_items_tracker->add_skipped_item($id, $title, $type, $reason);
-            return 'skipped';
+            // Depending on severity, might return 'skipped'
         }
-
-        $this->id_mapping[$id] = $processed_id;
-        $this->save_meta_data($processed_id, $item_data);
-        update_post_meta($processed_id, '_md_original_id', $id);
-
-        // Procesar imagen destacada
+        
+        // If not forcing IDs, $processed_id might be different from $id (if $id was from source and new post created)
+        // $id_mapping should map $original_id_from_file to $processed_wp_id
+        $this->id_mapping[$id] = $processed_id; 
+        
+        // --- INICIO: Recopilación de Referencias de Medios (en lugar de procesamiento inmediato) ---
+        // Imagen destacada
         if (!empty($item_data['featured_image'])) {
-            $this->media_handler->process_featured_image($processed_id, $item_data['featured_image']);
+            $current_post_media_references[] = [
+                // 'import_run_guid' => $this->current_import_run_guid, // Se añadirá en el Handler/JobManager
+                'post_id' => $processed_id,
+                'original_post_id_from_file' => $id, // ID original del post del archivo
+                'media_type' => 'featured_image',
+                'original_url' => $item_data['featured_image']
+            ];
         }
 
-        // Procesar imágenes en contenido
-        $this->media_handler->process_content_images($processed_id, $item_data);
+        // Imágenes en contenido
+        if (!empty($item_data['post_content'])) {
+            $content_image_urls = $this->extract_image_urls_from_content($item_data['post_content']);
+            foreach ($content_image_urls as $img_url) {
+                $current_post_media_references[] = [
+                    // 'import_run_guid' => $this->current_import_run_guid,
+                    'post_id' => $processed_id,
+                    'original_post_id_from_file' => $id,
+                    'media_type' => 'content_image',
+                    'original_url' => $img_url
+                ];
+            }
+        }
+        // --- FIN: Recopilación de Referencias de Medios ---
+        
+        // Procesar metadatos
+        $this->save_meta_data($processed_id, $item_data);
+        update_post_meta($processed_id, '_md_original_id', $id); // Guardar el ID original como meta
 
-        // Asignar categorías
+        // Procesar imágenes en contenido - YA NO SE HACE AQUÍ
+        // $this->media_handler->process_content_images($processed_id, $item_data);
+
+        // Asignar categorías y etiquetas
         if (!empty($item_data['categories'])) {
-            $this->taxonomy_importer->assign_categories($processed_id, $item_data['categories']);
+            $this->taxonomy_importer->assign_terms($processed_id, $item_data['categories'], 'category');
         }
-
-        // Asignar etiquetas
         if (!empty($item_data['tags'])) {
-            $this->taxonomy_importer->assign_tags($processed_id, $item_data['tags']);
+            $this->taxonomy_importer->assign_terms($processed_id, $item_data['tags'], 'post_tag');
         }
 
         // Importar comentarios
         if (!empty($item_data['comments'])) {
-            $this->comment_importer->import_comments($processed_id, $item_data['comments']);
+            $this->comment_importer->import_comments($processed_id, $item_data['comments'], $this->id_mapping);
         }
 
-        return $action === 'insert' ? 'imported' : 'updated';
+        // Return 'imported' for new posts, 'updated' for existing.
+        $final_status = ($action === 'insert' && !is_wp_error($result_id)) ? 'imported' : $action;
+        if (is_wp_error($result_id)) $final_status = 'skipped'; // Ensure errors lead to skipped status if not caught earlier
+
+        return ['status' => $final_status, 'media_references' => $current_post_media_references]; 
     }
 
     /**
@@ -297,7 +434,7 @@ class MD_Import_Force_Post_Importer {
         if (!empty($post_data['breadcrumb_title'])) update_post_meta($post_id, 'rank_math_breadcrumb_title', $post_data['breadcrumb_title']);
         if (!empty($post_data['meta_data']) && is_array($post_data['meta_data'])) {
             foreach ($post_data['meta_data'] as $key => $val) {
-                if (is_array($val) && isset($val['value'])) $val = $val['value'];
+                if (is_array($val) && isset($val['value'])) $val = $val['value']; // Handle Msls_Admin_Import - Export format
                 update_post_meta($post_id, $key, $val);
             }
         }

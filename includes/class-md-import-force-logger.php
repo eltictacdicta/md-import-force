@@ -102,4 +102,26 @@ class MD_Import_Force_Logger {
 
         return array('success' => true, 'message' => __('Log de errores limpiado con éxito.', 'md-import-force'));
     }
+
+    /**
+     * Crea la tabla de log si no existe o la actualiza si es necesario.
+     */
+    public static function create_log_table_if_needed() {
+        global $wpdb;
+        
+        $table_name = $wpdb->prefix . 'mdif_logs';
+        
+        $charset_collate = $wpdb->get_charset_collate();
+
+        $sql = "CREATE TABLE $table_name (
+            id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+            timestamp datetime NOT NULL,
+            level varchar(20) NOT NULL DEFAULT 'info',
+            message text NOT NULL,
+            PRIMARY KEY  (id)
+        ) $charset_collate;";
+
+        require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+        dbDelta( $sql );
+    }
 }

@@ -1,4 +1,20 @@
 document.addEventListener('DOMContentLoaded', function() {
+    // Define escapeHtml at a higher scope
+    const escapeHtml = (unsafe) => {
+        if (typeof unsafe !== 'string') {
+            if (typeof unsafe === 'number' || typeof unsafe === 'boolean') {
+                return String(unsafe);
+            }
+            return '';
+        }
+        return unsafe
+             .replace(/&/g, "&amp;")
+             .replace(/</g, "&lt;")
+             .replace(/>/g, "&gt;")
+             .replace(/"/g, "&quot;")
+             .replace(/'/g, "&#039;");
+    };
+
     // ===== FUNCIONES AUXILIARES =====
 
     // Función para mostrar mensajes en la interfaz
@@ -135,36 +151,58 @@ document.addEventListener('DOMContentLoaded', function() {
         if (previewArea) previewArea.style.display = 'block';
         
         if (previewContent) {
-            // Helper for escaping HTML
-            const escapeHtml = (unsafe) => {
-                if (typeof unsafe !== 'string') {
-                    // Attempt to convert to string if not already, e.g. for numbers like record.ID
-                    if (typeof unsafe === 'number' || typeof unsafe === 'boolean') {
-                        return String(unsafe);
-                    }
-                    return ''; // Or handle other types as needed, returning empty for undefined/null
-                }
-                return unsafe
-                     .replace(/&/g, "&amp;")
-                     .replace(/</g, "&lt;")
-                     .replace(/>/g, "&gt;")
-                     .replace(/"/g, "&quot;")
-                     .replace(/'/g, "&#039;");
-            }
-
             let content = '<h4>Información del sitio de origen:</h4>';
             content += '<p>URL: ' + escapeHtml(previewData.site_info.site_url) + '</p>';
             content += '<p>Nombre: ' + escapeHtml(previewData.site_info.site_name) + '</p>';
-            content += '<h4>Primeros ' + escapeHtml(String(previewData.preview_records.length)) + ' de ' + escapeHtml(String(previewData.total_records)) + ' registros:</h4>';
-            content += '<ul>';
             
-            previewData.preview_records.forEach(function(record) {
-                content += '<li>ID: ' + escapeHtml(String(record.ID)) + 
-                           ', Título: ' + escapeHtml(record.post_title) + 
-                           ', Tipo: ' + escapeHtml(record.post_type) + '</li>';
-            });
-            
-            content += '</ul>';
+            // Generar mensaje resumen usando los nuevos datos del backend
+            let summaryMessage = '';
+            const totalInFile = previewData.total_records_in_file;
+            const totalMissing = previewData.total_missing_in_file;
+            const totalExisting = previewData.total_existing_in_file;
+            const countInPreview = previewData.preview_records.length;
+
+            if (totalInFile === 0) {
+                summaryMessage = '<p style="color: orange;">El archivo no contiene posts para importar.</p>';
+            } else if (totalMissing === 0) {
+                summaryMessage = '<p style="color: green;">¡Excelente! Parece que los ' + totalInFile + ' post(s) del archivo ya han sido importados previamente.</p>';
+            } else {
+                summaryMessage = '<p style="color: blue;">El archivo contiene un total de ' + totalInFile + ' post(s).</p>';
+                summaryMessage += '<p style="color: orange;">De estos, ' + totalExisting + ' post(s) ya existen en la base de datos.</p>';
+                summaryMessage += '<p style="color: green;">Quedan ' + totalMissing + ' post(s) por importar.</p>';
+                if (countInPreview > 0) {
+                    summaryMessage += '<p>A continuación se muestran los primeros ' + countInPreview + ' de los posts que faltan por importar:</p>';
+                } else {
+                    summaryMessage += '<p style="color: orange;">No hay más posts que falten por importar para mostrar en esta previsualización (aunque se detectaron ' + totalMissing + ' faltantes en total).</p>';
+                }
+            }
+            content += summaryMessage; // Añadir el mensaje resumen al contenido
+
+            if (countInPreview > 0) {
+                content += '<h4>Primeros ' + escapeHtml(String(countInPreview)) + ' de ' + escapeHtml(String(totalMissing)) + ' posts que faltan por importar:</h4>';
+                content += '<ul>';
+                previewData.preview_records.forEach(function(record) {
+                    // Como ahora solo mostramos los que faltan, no es necesario el `existingIndicator`
+                    content += '<li>ID: ' + escapeHtml(String(record.ID)) +
+                               ', Título: ' + escapeHtml(record.post_title) +
+                               ', Tipo: ' + escapeHtml(record.post_type) + '</li>';
+                });
+                content += '</ul>';
+            }
+
+            const optionsWrapper = document.getElementById('md-import-force-options-wrapper');
+            const onlyMissingCheckbox = document.getElementById('import_only_missing');
+
+            if (optionsWrapper && onlyMissingCheckbox) {
+                if (previewData.total_existing_in_file > 0 && previewData.total_missing_in_file > 0) {
+                    optionsWrapper.style.display = 'block';
+                    onlyMissingCheckbox.checked = true; // Marcar por defecto si la situación lo amerita
+                } else {
+                    optionsWrapper.style.display = 'none';
+                    onlyMissingCheckbox.checked = false;
+                }
+            }
+
             previewContent.innerHTML = content;
         }
     }
@@ -236,8 +274,34 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
 
-            const formData = new FormData(this);
-            formData.append('file_path', previewFilePath);
+            // Construct a JavaScript object for the JSON payload
+            const payload = {
+                file_path: previewFilePath
+            };
+
+            // Añadir la opción de importar solo faltantes si el checkbox está presente y marcado
+            const onlyMissingCheckboxForm = document.getElementById('import_only_missing');
+            if (onlyMissingCheckboxForm) { // Check if element exists
+                payload.import_only_missing = onlyMissingCheckboxForm.checked ? '1' : '0';
+            } else {
+                payload.import_only_missing = '0'; // Default if checkbox not found
+            }
+
+            // Obtener otras opciones del formulario si es necesario
+            // Ejemplo: const otherOption = document.getElementById('other_option_id').value;
+            // if (otherOption) payload.other_option = otherOption;
+            
+            // >>> OBTENER TODAS LAS OPCIONES DEL FORMULARIO (checkboxes) <<<
+            const optionsCheckboxes = document.querySelectorAll('#md-import-force-options input[type="checkbox"]');
+            optionsCheckboxes.forEach(checkbox => {
+                // Usa el 'name' del checkbox como clave en el payload
+                // y su estado 'checked' (true/false) como valor, convertido a '1' o '0'.
+                // Asegúrate de que 'import_only_missing' se maneje como arriba si tiene lógica especial
+                // o si su ID no coincide con su 'name' property.
+                if (checkbox.id !== 'import_only_missing') { // ya manejado
+                    payload[checkbox.name] = checkbox.checked ? '1' : '0';
+                }
+            });
 
             // Ocultar previsualización y mostrar mensajes/progreso
             const previewArea = document.getElementById('md-import-force-preview-area');
@@ -253,7 +317,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
             apiFetch('import', {
                 method: 'POST',
-                body: formData
+                headers: {
+                    'Content-Type': 'application/json',
+                    // X-WP-Nonce is already added by apiFetch function
+                },
+                body: JSON.stringify(payload) // Send data as JSON
             })
             .then(response => {
                 if (response.success && response.import_id && response.status === 'queued') {
@@ -295,7 +363,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     
                     updateProgressUI(progressData);
 
-                    if (progressData.status === 'completed' || progressData.status === 'failed' || progressData.status === 'completed_with_errors') {
+                    if (progressData.status === 'completed' || progressData.status === 'failed' || progressData.status === 'completed_with_errors' || progressData.status === 'stopped') {
                         importCompletedProcessed = true;
                         clearInterval(progressCheckInterval);
                         finalizeImport(progressData);
@@ -316,14 +384,17 @@ document.addEventListener('DOMContentLoaded', function() {
                 const progressTotalElement = document.getElementById('progress-total');
                 const progressPercentElement = document.getElementById('progress-percent');
                 const currentItemElement = document.getElementById('current-item-info');
+                const overallMessageElement = document.getElementById('md-import-force-current-item');
                 
                 // Mostrar los elementos de progreso
                 toggleProgressElements(true);
                 
                 let percentComplete = 0;
-                
-                if (progressData && progressData.total && progressData.total > 0) {
-                    percentComplete = Math.round((progressData.current / progressData.total) * 100);
+                const totalCount = parseInt(progressData.total_count, 10) || 0;
+                const processedCount = parseInt(progressData.processed_count, 10) || 0;
+
+                if (totalCount > 0) {
+                    percentComplete = Math.round((processedCount / totalCount) * 100);
                 }
                 
                 // Actualizar barra de progreso
@@ -332,16 +403,28 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 
                 // Actualizar textos de progreso
-                if (progressCountElement) progressCountElement.textContent = progressData.current || '0';
-                if (progressTotalElement) progressTotalElement.textContent = progressData.total || '0';
+                if (progressCountElement) progressCountElement.textContent = processedCount;
+                if (progressTotalElement) progressTotalElement.textContent = totalCount;
                 if (progressPercentElement) progressPercentElement.textContent = percentComplete + '%';
-                if (currentItemElement) currentItemElement.textContent = progressData.current_item || 'Procesando...';
                 
                 // Actualizar el ID de importación global para que otros scripts puedan acceder a él
                 window.currentImportId = progressData.import_id || null;
                 
                 // Determinar estado de la importación
                 const status = progressData.status || '';
+
+                // Actualizar el mensaje principal del progreso
+                if (status === 'stopped') {
+                    if (currentItemElement) {
+                        currentItemElement.textContent = md_import_force.i18n.import_process_stopped_message || "Proceso de importación detenido.";
+                    }
+                } else {
+                    const defaultMessage = progressData.status === 'queued' ? (md_import_force.i18n.import_queued_message || 'Importación en cola...') : (md_import_force.i18n.processing_message || 'Procesando...');
+                    const itemMessage = progressData.current_item_message || defaultMessage;
+                    if (currentItemElement) {
+                         currentItemElement.textContent = itemMessage;
+                    }
+                }
                 
                 // Dispatch custom event for other scripts to respond to progress updates
                 const progressEvent = new CustomEvent('md_import_force_progress_update', {
@@ -360,17 +443,40 @@ document.addEventListener('DOMContentLoaded', function() {
                 const elapsedMinutes = Math.floor(elapsedTime / 60);
                 const elapsedSeconds = Math.floor(elapsedTime % 60);
                 
-                let successMessage = md_import_force.i18n.completed + '<br>';
-                successMessage += 'Tiempo total: ' + elapsedMinutes + 'm ' + elapsedSeconds + 's<br>';
-                successMessage += 'Elementos procesados: ' + progressData.processed_count + ' de ' + progressData.total_count;
+                let finalMessageText = '';
+                let messageType = 'success'; // Default to success
+
+                if (progressData.status === 'stopped') {
+                    finalMessageText = md_import_force.i18n.import_stopped_by_user || 'Importación detenida por el usuario.';
+                    messageType = 'warning'; 
+                } else if (progressData.status === 'failed') {
+                    finalMessageText = md_import_force.i18n.import_failed || 'La importación falló.';
+                    messageType = 'error';
+                } else if (progressData.status === 'completed_with_errors') {
+                    finalMessageText = md_import_force.i18n.import_completed_with_errors || 'Importación completada con errores.';
+                    messageType = 'warning';
+                } else { // Assumed 'completed' status
+                    finalMessageText = md_import_force.i18n.completed || 'Importación completada.';
+                    // messageType remains 'success'
+                }
+
+                let fullMessage = finalMessageText;
+                fullMessage += `<br>Tiempo total: ${elapsedMinutes}m ${elapsedSeconds}s<br>`;
+                fullMessage += `Elementos procesados: ${progressData.processed_count} de ${progressData.total_count}`;
                 
                 if (progressData.stats) {
-                    successMessage += '<br>Nuevos: ' + (progressData.stats.new_count || 0);
-                    successMessage += ', Actualizados: ' + (progressData.stats.updated_count || 0);
-                    successMessage += ', Omitidos: ' + (progressData.stats.skipped_count || 0);
+                    fullMessage += `<br>Nuevos: ${progressData.stats.new_count || 0}`;
+                    fullMessage += `, Actualizados: ${progressData.stats.updated_count || 0}`;
+                    fullMessage += `, Omitidos: ${progressData.stats.skipped_count || 0}`;
                 }
                 
-                showMessage(successMessage, 'success');
+                // Append specific error/details message from backend if available and relevant
+                if (progressData.message && (progressData.status === 'failed' || progressData.status === 'completed_with_errors' || progressData.status === 'stopped')) {
+                    // Using the globally scoped escapeHtml function
+                    fullMessage += `<br>${md_import_force.i18n.details || 'Detalles'}: ${escapeHtml(progressData.message)}`;
+                }
+
+                showMessage(fullMessage, messageType);
             }
         });
     }
