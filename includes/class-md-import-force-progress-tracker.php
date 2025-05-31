@@ -364,6 +364,244 @@ class MD_Import_Force_Progress_Tracker {
         dbDelta( $sql );
     }
 
+    /**
+     * Obtiene el contador de elementos procesados globalmente para una importación.
+     *
+     * @param string $import_id Identificador único de la importación.
+     * @return int Número de elementos procesados globalmente.
+     */
+    public static function get_overall_processed_count($import_id) {
+        if (empty($import_id)) return 0;
+        $progress_data = self::get_progress($import_id);
+        return $progress_data['processed_count'] ?? 0;
+    }
+
+    /**
+     * Actualiza el contador de elementos procesados globalmente y el timestamp.
+     * Este método es más específico que update_progress y solo toca el contador y el timestamp.
+     *
+     * @param string $import_id Identificador único de la importación.
+     * @param int $new_count Nuevo contador de elementos procesados.
+     */
+    public static function update_overall_processed_count($import_id, $new_count) {
+        if (empty($import_id)) return;
+        $progress_file = self::_get_progress_file_path($import_id);
+        if (!$progress_file) return;
+
+        $data = [];
+        if (file_exists($progress_file)) {
+            $data = json_decode(file_get_contents($progress_file), true);
+        }
+
+        // Si no hay datos o no se pudieron decodificar, inicializar con valores básicos.
+        // Esto es un resguardo, idealmente el archivo ya existe y es válido.
+        if (empty($data)) {
+            MD_Import_Force_Logger::log_message("MD Import Force [PROGRESS WARN]: Archivo de progreso no encontrado o corrupto en update_overall_processed_count para {$import_id}. Se intentará crear/resetear.");
+            // No llamar a initialize_progress aquí para no sobrescribir el total_count si ya existe.
+            // Simplemente estableceremos los campos necesarios.
+            $data = self::_default_progress_data($import_id, 'processing', __('Actualizando contador...', 'md-import-force'));
+            // Si tenemos un total_count previo de alguna manera, deberíamos intentar preservarlo.
+            // Por ahora, _default_progress_data no lo hace. Se necesitaría un get_progress() más robusto.
+        }
+
+        $data['processed_count'] = (int)$new_count;
+        $data['timestamp'] = time();
+
+        // Recalcular porcentaje si total_count está disponible
+        if (isset($data['total_count']) && $data['total_count'] > 0) {
+            $data['percent'] = round(((int)$new_count / (int)$data['total_count']) * 100);
+        } else {
+            $data['percent'] = 0; // No se puede calcular si no hay total
+        }
+        
+        // Asegurar que el estado sea 'processing' si no es un estado final
+        if (isset($data['status']) && $data['status'] !== 'completed' && $data['status'] !== 'failed' && $data['status'] !== 'stopped') {
+            $data['status'] = 'processing';
+        }
+
+        if (@file_put_contents($progress_file, json_encode($data)) === false) {
+            if (class_exists('MD_Import_Force_Logger')) {
+                MD_Import_Force_Logger::log_message("MD Import Force [PROGRESS ERROR]: No se pudo escribir la actualización de contador en: {$progress_file}");
+            }
+        }
+    }
+
+    /**
+     * Agrega un Post ID a la cola de posts que necesitan actualización de contenido.
+     *
+     * @param string $import_run_guid GUID de la sesión de importación.
+     * @param int $post_id ID del post en WordPress.
+     * @param string $import_id ID de la importación (file_path) - opcional, se puede inferir del contexto
+     */
+    public static function add_post_to_content_update_queue($import_run_guid, $post_id, $import_id = null) {
+        if (empty($import_run_guid) || empty($post_id)) return;
+
+        // Si no se proporciona import_id, intentamos obtenerlo del contexto
+        // o simplemente logueamos el error sin procesar
+        if (empty($import_id)) {
+            MD_Import_Force_Logger::log_message("MD Import Force [PROGRESS WARNING]: add_post_to_content_update_queue llamado sin import_id para GUID: {$import_run_guid}, Post: {$post_id}");
+            return;
+        }
+
+        $progress_file = self::_get_progress_file_path($import_id);
+         if (!$progress_file || !file_exists($progress_file)) {
+              if (class_exists('MD_Import_Force_Logger')) {
+                  MD_Import_Force_Logger::log_message("MD Import Force [PROGRESS ERROR]: Archivo de progreso no encontrado para import_id {$import_id} al añadir post a cola de actualización de contenido.");
+              }
+              return;
+         }
+
+         $data = json_decode(file_get_contents($progress_file), true);
+         if (!$data) {
+               if (class_exists('MD_Import_Force_Logger')) {
+                  MD_Import_Force_Logger::log_message("MD Import Force [PROGRESS ERROR]: No se pudo decodificar el archivo de progreso: {$progress_file} al añadir post a cola de actualización de contenido.");
+              }
+              return;
+         }
+
+         // Asegurarse de que la estructura existe
+         if (!isset($data['posts_to_update_content'])) {
+             $data['posts_to_update_content'] = [];
+         }
+
+         // Añadir el post_id si no está ya en la lista
+         if (!in_array($post_id, $data['posts_to_update_content'])) {
+             $data['posts_to_update_content'][] = $post_id;
+         }
+         
+         // Opcional: almacenar también por GUID para referencia, aunque la clave principal es import_id
+         if (!isset($data['content_update_queue_by_guid'])) {
+              $data['content_update_queue_by_guid'] = [];
+         }
+         if (!isset($data['content_update_queue_by_guid'][$import_run_guid])) {
+             $data['content_update_queue_by_guid'][$import_run_guid] = [];
+         }
+         if (!in_array($post_id, $data['content_update_queue_by_guid'][$import_run_guid])) {
+             $data['content_update_queue_by_guid'][$import_run_guid][] = $post_id;
+         }
+
+         // Guardar los cambios
+         if (@file_put_contents($progress_file, json_encode($data)) === false) {
+             if (class_exists('MD_Import_Force_Logger')) {
+                 MD_Import_Force_Logger::log_message("MD Import Force [PROGRESS ERROR]: No se pudo escribir en el archivo de progreso ({$progress_file}) al añadir post a cola de actualización de contenido.");
+             }
+         }
+          if (class_exists('MD_Import_Force_Logger')) {
+              MD_Import_Force_Logger::log_message("MD Import Force [PROGRESS INFO]: Post ID {$post_id} añadido a cola de actualización de contenido para import_id {$import_id} (GUID: {$import_run_guid}).");
+          }
+    }
+
+    /**
+     * Obtiene la lista de Post IDs que necesitan actualización de contenido para un import_run_guid específico.
+     *
+     * @param string $import_run_guid GUID de la sesión de importación.
+     * @param string $import_id ID de la importación (file_path).
+     * @return array Lista de Post IDs.
+     */
+    public static function get_posts_for_content_update($import_run_guid, $import_id) {
+        if (empty($import_run_guid) || empty($import_id)) return [];
+        
+        $progress_file = self::_get_progress_file_path($import_id);
+        if (!$progress_file || !file_exists($progress_file)) {
+            if (class_exists('MD_Import_Force_Logger')) {
+                MD_Import_Force_Logger::log_message("MD Import Force [PROGRESS ERROR]: Archivo de progreso no encontrado para import_id {$import_id} al obtener posts para actualización de contenido.");
+            }
+            return [];
+        }
+
+        $data = json_decode(file_get_contents($progress_file), true);
+        if (!$data) {
+             if (class_exists('MD_Import_Force_Logger')) {
+                MD_Import_Force_Logger::log_message("MD Import Force [PROGRESS ERROR]: No se pudo decodificar el archivo de progreso: {$progress_file} al obtener posts para actualización de contenido.");
+            }
+            return [];
+        }
+
+        // Recuperar la lista asociada al GUID si existe, o la lista global si no
+        // Usamos la lista por GUID para ser más específicos si el progreso rastrea múltiples importaciones.
+        // Si no encontramos por GUID, quizás la lista global (si existiera) podría ser un fallback,
+        // pero para este plugin, la lista por GUID es lo que esperamos usar.
+        if (isset($data['content_update_queue_by_guid'][$import_run_guid]) && is_array($data['content_update_queue_by_guid'][$import_run_guid])) {
+            return $data['content_update_queue_by_guid'][$import_run_guid];
+        } elseif (isset($data['posts_to_update_content']) && is_array($data['posts_to_update_content'])) {
+             // Fallback a la lista global si no hay lista por GUID (compatibilidad o si se decide no usar por GUID)
+             // PERO: Si hay múltiples imports rastreados en el mismo archivo, esto podría devolver Posts de otro import.
+             // Es más seguro depender del rastreo por GUID.
+             // Vamos a requerir el rastreo por GUID para evitar mezclar posts de diferentes imports.
+            if (class_exists('MD_Import_Force_Logger')) {
+                 MD_Import_Force_Logger::log_message("MD Import Force [PROGRESS WARN]: No se encontró lista de posts para actualización de contenido por GUID {$import_run_guid}, ni lista global en archivo de progreso {$import_id}.");
+            }
+             return [];
+        }
+
+        if (class_exists('MD_Import_Force_Logger')) {
+            MD_Import_Force_Logger::log_message("MD Import Force [PROGRESS INFO]: No hay Post IDs registrados para actualización de contenido para GUID {$import_run_guid} en archivo de progreso {$import_id}.");
+        }
+        return []; // No hay posts para actualizar
+    }
+
+     /**
+      * Elimina un Post ID de la cola de posts que necesitan actualización de contenido.
+      *
+      * @param string $import_run_guid GUID de la sesión de importación.
+      * @param string $import_id ID de la importación (file_path).
+      * @param int $post_id ID del post en WordPress a eliminar.
+      */
+    public static function remove_post_from_content_update_queue($import_run_guid, $import_id, $post_id) {
+         if (empty($import_run_guid) || empty($import_id) || empty($post_id)) return;
+
+         $progress_file = self::_get_progress_file_path($import_id);
+         if (!$progress_file || !file_exists($progress_file)) {
+              if (class_exists('MD_Import_Force_Logger')) {
+                  MD_Import_Force_Logger::log_message("MD Import Force [PROGRESS ERROR]: Archivo de progreso no encontrado para import_id {$import_id} al eliminar post de cola de actualización de contenido.");
+              }
+              return;
+         }
+
+         $data = json_decode(file_get_contents($progress_file), true);
+         if (!$data) {
+               if (class_exists('MD_Import_Force_Logger')) {
+                  MD_Import_Force_Logger::log_message("MD Import Force [PROGRESS ERROR]: No se pudo decodificar el archivo de progreso: {$progress_file} al eliminar post de cola de actualización de contenido.");
+              }
+              return;
+         }
+
+         $updated = false;
+
+         // Eliminar de la lista por GUID
+         if (isset($data['content_update_queue_by_guid'][$import_run_guid]) && is_array($data['content_update_queue_by_guid'][$import_run_guid])) {
+             $key = array_search($post_id, $data['content_update_queue_by_guid'][$import_run_guid]);
+             if ($key !== false) {
+                 unset($data['content_update_queue_by_guid'][$import_run_guid][$key]);
+                 $data['content_update_queue_by_guid'][$import_run_guid] = array_values($data['content_update_queue_by_guid'][$import_run_guid]); // Reindexar
+                 $updated = true;
+             }
+         }
+
+         // Eliminar de la lista global (si la estamos usando o soportando como fallback)
+          if (isset($data['posts_to_update_content']) && is_array($data['posts_to_update_content'])) {
+              $key = array_search($post_id, $data['posts_to_update_content']);
+              if ($key !== false) {
+                  unset($data['posts_to_update_content'][$key]);
+                  $data['posts_to_update_content'] = array_values($data['posts_to_update_content']); // Reindexar
+                   $updated = true;
+              }
+          }
+
+         if ($updated) {
+              // Guardar los cambios
+              if (@file_put_contents($progress_file, json_encode($data)) === false) {
+                  if (class_exists('MD_Import_Force_Logger')) {
+                      MD_Import_Force_Logger::log_message("MD Import Force [PROGRESS ERROR]: No se pudo escribir en el archivo de progreso ({$progress_file}) al eliminar post de cola de actualización de contenido.");
+                  }
+              } else {
+                   if (class_exists('MD_Import_Force_Logger')) {
+                       MD_Import_Force_Logger::log_message("MD Import Force [PROGRESS INFO]: Post ID {$post_id} eliminado de cola de actualización de contenido para import_id {$import_id} (GUID: {$import_run_guid}).");
+                   }
+              }
+         }
+    }
+
     /*
     // ---- Old instance-based methods and constructor ----
     // ---- Commented out for replacement with static methods ----
@@ -442,5 +680,8 @@ class MD_Import_Force_Progress_Tracker {
     // }
     */
 }
+
+@ini_set('max_execution_time', '300');  // 5 minutes
+@ini_set('max_input_time', '300');
 
 ?>

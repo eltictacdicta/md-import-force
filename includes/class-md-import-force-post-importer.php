@@ -69,37 +69,75 @@ class MD_Import_Force_Post_Importer {
      * @param array $options Opciones de importación.
      * @param int &$overall_processed_count_ref Referencia al contador global de elementos procesados (actualizado por este método).
      * @param int $overall_total_items_in_file Total de elementos en el archivo de importación global.
-     * @return array Estadísticas de esta tanda de posts (new_count, updated_count, skipped_count, etc.).
+     * @param int $batch_run_start_time Timestamp de cuándo comenzó el procesamiento del lote actual del Job Manager.
+     * @param int $time_limit_for_this_run Tiempo máximo en segundos para esta ejecución del lote.
+     * @return array Estadísticas de esta tanda de posts y estado de ejecución.
      */
-    public function import_posts($items_data, $import_id, $options, &$overall_processed_count_ref, $overall_total_items_in_file) {
+    public function import_posts(
+        $items_data, 
+        $import_id, 
+        $options, 
+        &$overall_processed_count_ref, 
+        $overall_total_items_in_file,
+        $batch_run_start_time,
+        $time_limit_for_this_run 
+    ) {
         $new_count_local = 0; 
         $updated_count_local = 0; 
         $skipped_count_local = 0;
-        $total_items_in_this_batch = count($items_data);
-        $media_references_for_queue = []; // Array para recopilar todas las referencias de medios de esta tanda
+        $items_actually_processed_this_run = 0;
+        $time_exceeded = false;
+        $media_references_for_queue = [];
+
+        $total_items_in_this_call = count($items_data);
         
-        MD_Import_Force_Logger::log_message("MD Import Force [POST_IMPORTER]: Iniciando procesamiento de {$total_items_in_this_batch} posts para import_id: {$import_id}. Avance global actual: {$overall_processed_count_ref}/{$overall_total_items_in_file}. Total global esperado: {$overall_total_items_in_file}");
+        MD_Import_Force_Logger::log_message("MD Import Force [POST_IMPORTER]: Iniciando procesamiento de hasta {$total_items_in_this_call} posts para import_id: {$import_id}. Avance global actual: {$overall_processed_count_ref}/{$overall_total_items_in_file}. Límite de tiempo para esta corrida: {$time_limit_for_this_run}s.");
 
-        // Limpiar el rastreador de elementos omitidos para esta tanda (si se quiere por tanda, o globalmente en Handler)
-        // Si es global, el Handler lo gestiona. Si es por tanda (ej. por JSON en un ZIP), aquí.
-        // $this->skipped_items_tracker->clear(); // Comentado, la gestión de skipped_items es ahora más global en el Handler.
+        $last_progress_update_time = $batch_run_start_time;
+        $items_processed_since_last_update = 0;
+        $progress_update_interval_seconds = 5; // Actualizar progreso al menos cada 5 segundos si hay actividad
+        $progress_update_item_count_trigger = 3; // O cada 3 items
 
-        // No se usa el $this->progress_tracker, se usan los métodos estáticos de MD_Import_Force_Progress_Tracker
-        // La actualización inicial de progreso (total_items_in_file) la hace el Handler.
+        foreach ($items_data as $item_index => $item_data) {
+            // 1. Chequeo de tiempo de ejecución
+            if (time() - $batch_run_start_time >= $time_limit_for_this_run) {
+                $time_exceeded = true;
+                MD_Import_Force_Logger::log_message("MD Import Force [POST_IMPORTER]: Límite de tiempo ({$time_limit_for_this_run}s) excedido para import_id: {$import_id}. Deteniendo procesamiento de este lote. Items procesados en esta corrida: {$items_actually_processed_this_run}.");
+                break; // Salir del bucle foreach
+            }
 
-        foreach ($items_data as $item_data) {
-            $overall_processed_count_ref++; // Incrementar el contador global de procesados
+            $overall_processed_count_ref++; 
+            $items_actually_processed_this_run++;
             
             $original_id = $item_data['ID'] ?? 'N/A';
             $title = $item_data['post_title'] ?? '[Sin Título]';
             $type = $item_data['post_type'] ?? 'post';
 
-            // >>> INICIO: Lógica para importar solo faltantes <<<
+            // 2. Chequeo de detención manual
+            if (get_option('md_import_force_stop_all_imports_requested', false) || get_transient('md_import_force_stop_request_' . $import_id)) {
+                $stop_reason = get_transient('md_import_force_stop_request_' . $import_id) 
+                    ? "solicitud específica para import_id {$import_id}" 
+                    : "solicitud global";
+                MD_Import_Force_Logger::log_message("MD Import Force [STOP REQUESTED]: Importación detenida por {$stop_reason} después de procesar {$overall_processed_count_ref} elementos (este item no será procesado).");
+                MD_Import_Force_Progress_Tracker::update_status(
+                    $import_id, 
+                    'stopped', 
+                    __('Importación detenida manualmente por el usuario.', 'md-import-force')
+                );
+                return [
+                    'new_count' => $new_count_local,
+                    'updated_count' => $updated_count_local,
+                    'skipped_count' => $skipped_count_local,
+                    'items_actually_processed_this_run' => $items_actually_processed_this_run - 1, // No contamos el item actual
+                    'time_exceeded' => false, // No fue por tiempo, fue manual
+                    'stopped_manually' => true,
+                    'media_references' => $media_references_for_queue,
+                    'message' => __('Importación detenida manualmente por el usuario.', 'md-import-force')
+                ];
+            }
+            
+            // 3. Lógica "Importar solo faltantes"
             if (isset($options['import_only_missing']) && ($options['import_only_missing'] === true || $options['import_only_missing'] === '1' || $options['import_only_missing'] === 1)) {
-                // Loguear el valor exacto para diagnóstico
-                $option_value = var_export($options['import_only_missing'], true);
-                MD_Import_Force_Logger::log_message("MD Import Force [POST_IMPORTER]: Opción import_only_missing activada con valor: {$option_value}");
-                
                 $existing_post_check = get_page_by_title(html_entity_decode($title), OBJECT, $type);
                 if ($existing_post_check !== null && $existing_post_check->post_status !== 'trash') {
                     $skipped_count_local++;
@@ -107,7 +145,6 @@ class MD_Import_Force_Post_Importer {
                     $this->skipped_items_tracker->add_skipped_item($original_id, $title, $type, $reason);
                     MD_Import_Force_Logger::log_message("MD Import Force [SKIP POST - ONLY MISSING]: Post ID {$original_id} ('{$title}') omitido porque ya existe.");
                     
-                    // Actualizar progreso para este item omitido
                     $current_item_message_skipped = sprintf(__('Omitido (%d/%d): %s ID %s (%s) - Ya existe', 'md-import-force'),
                         $overall_processed_count_ref,
                         $overall_total_items_in_file,
@@ -115,100 +152,91 @@ class MD_Import_Force_Post_Importer {
                         $original_id,
                         $title
                     );
-                    MD_Import_Force_Progress_Tracker::update_progress(
-                        $import_id,
-                        $overall_processed_count_ref,
-                        $overall_total_items_in_file,
-                        $current_item_message_skipped
-                    );
-                    continue; // Saltar al siguiente item
+                    // La actualización de progreso se manejará con la lógica de frecuencia más abajo
+                    // MD_Import_Force_Progress_Tracker::update_progress(...); 
+                    $items_processed_since_last_update++;
+                    // Continuar para asegurar que el progreso se actualice si es necesario
+                } else { // El post no existe, proceder a importarlo
+                    try {
+                        $result_array = $this->process_post_item($item_data, $options);
+                        $res = $result_array['status'];
+                        if (isset($result_array['media_references']) && !empty($result_array['media_references'])) {
+                            $media_references_for_queue = array_merge($media_references_for_queue, $result_array['media_references']);
+                        }
+                        if ($res === 'imported') $new_count_local++;
+                        elseif ($res === 'updated') $updated_count_local++;
+                        else $skipped_count_local++;
+                    } catch (Exception $e) {
+                        MD_Import_Force_Logger::log_message("MD Import Force [POST_IMPORTER ERROR] Post/Página ID {$original_id} ('{$title}') para import_id {$import_id}: " . $e->getMessage());
+                        $skipped_count_local++;
+                        $this->skipped_items_tracker->add_skipped_item($original_id, $title, $type, $e->getMessage());
+                    }
+                    $items_processed_since_last_update++;
                 }
+            } else { // No es "import_only_missing" o no se aplica, procesar normalmente
+                try {
+                    $result_array = $this->process_post_item($item_data, $options);
+                    $res = $result_array['status'];
+                    if (isset($result_array['media_references']) && !empty($result_array['media_references'])) {
+                        $media_references_for_queue = array_merge($media_references_for_queue, $result_array['media_references']);
+                    }
+                    if ($res === 'imported') $new_count_local++;
+                    elseif ($res === 'updated') $updated_count_local++;
+                    else $skipped_count_local++;
+                } catch (Exception $e) {
+                    MD_Import_Force_Logger::log_message("MD Import Force [POST_IMPORTER ERROR] Post/Página ID {$original_id} ('{$title}') para import_id {$import_id}: " . $e->getMessage());
+                    $skipped_count_local++;
+                    $this->skipped_items_tracker->add_skipped_item($original_id, $title, $type, $e->getMessage());
+                }
+                $items_processed_since_last_update++;
             }
-            // >>> FIN: Lógica para importar solo faltantes <<<
 
-            // Verificar si se ha solicitado detener las importaciones (global o específica)
-            if (get_option('md_import_force_stop_all_imports_requested', false) || get_transient('md_import_force_stop_request_' . $import_id)) {
-                $stop_reason = get_transient('md_import_force_stop_request_' . $import_id) 
-                    ? "solicitud específica para import_id {$import_id}" 
-                    : "solicitud global";
-                    
-                MD_Import_Force_Logger::log_message("MD Import Force [STOP REQUESTED]: Importación detenida por {$stop_reason} después de procesar {$overall_processed_count_ref} elementos.");
+            // 4. Actualización de Progreso (con frecuencia controlada)
+            $time_since_last_update = time() - $last_progress_update_time;
+            $force_update_due_to_time_limit = (time() - $batch_run_start_time) / $time_limit_for_this_run > 0.7;
+
+            if ($items_processed_since_last_update >= $progress_update_item_count_trigger || 
+                $time_since_last_update >= $progress_update_interval_seconds || 
+                $force_update_due_to_time_limit ||
+                $items_actually_processed_this_run === $total_items_in_this_call // Forzar al final del lote
+                ) {
                 
-                // Actualizar el progreso indicando que se detuvo manualmente
-                MD_Import_Force_Progress_Tracker::update_status(
-                    $import_id, 
-                    'stopped', 
-                    __('Importación detenida manualmente por el usuario.', 'md-import-force')
+                $current_item_message = sprintf(__('Procesando (%d/%d): %s ID %s (%s)', 'md-import-force'),
+                    $overall_processed_count_ref,
+                    $overall_total_items_in_file,
+                    $type, // El último tipo procesado en este ciclo de actualización
+                    $original_id, // El último ID original procesado
+                    $title // El último título procesado
                 );
-                
-                // Devolver los resultados parciales hasta el momento de la detención
-                return [
-                    'new_count' => $new_count_local,
-                    'updated_count' => $updated_count_local,
-                    'skipped_count' => $skipped_count_local,
-                    'processed_count' => $overall_processed_count_ref,
-                    'total_count' => $overall_total_items_in_file,
-                    'stopped_manually' => true,
-                    'message' => __('Importación detenida manualmente por el usuario.', 'md-import-force')
-                ];
+                MD_Import_Force_Progress_Tracker::update_progress(
+                    $import_id,
+                    $overall_processed_count_ref,
+                    $overall_total_items_in_file,
+                    $current_item_message
+                );
+                $items_processed_since_last_update = 0;
+                $last_progress_update_time = time();
+                MD_Import_Force_Logger::log_message("MD Import Force [POST_IMPORTER]: Progreso actualizado para import_id {$import_id} en item {$overall_processed_count_ref}/{$overall_total_items_in_file}.");
             }
+        } // Fin del foreach
 
-            $current_item_message = sprintf(__('Procesando (%d/%d): %s ID %s (%s)', 'md-import-force'),
-                $overall_processed_count_ref,
-                $overall_total_items_in_file,
-                $type,
-                $original_id,
-                $title
-            );
-            MD_Import_Force_Progress_Tracker::update_progress(
-                $import_id,
-                $overall_processed_count_ref,
-                $overall_total_items_in_file,
-                $current_item_message
-            );
-
-            try {
-                // Modificado: process_post_item ahora también devuelve las referencias de medios para el post actual
-                $result_array = $this->process_post_item($item_data, $options); // $options se pasan aquí
-                $res = $result_array['status'];
-                
-                if (isset($result_array['media_references']) && !empty($result_array['media_references'])) {
-                    $media_references_for_queue = array_merge($media_references_for_queue, $result_array['media_references']);
-                }
-
-                if ($res === 'imported') $new_count_local++;
-                elseif ($res === 'updated') $updated_count_local++;
-                else $skipped_count_local++;
-            } catch (Exception $e) {
-                MD_Import_Force_Logger::log_message("MD Import Force [POST_IMPORTER ERROR] Post/Página ID {$original_id} ('{$title}') para import_id {$import_id}: " . $e->getMessage());
-                $skipped_count_local++;
-                $this->skipped_items_tracker->add_skipped_item($original_id, $title, $type, $e->getMessage());
-            }
-            // No wp_cache_flush o gc_collect_cycles aquí para no ralentizar el proceso en segundo plano.
-            // El Handler puede hacer un flush al final de todo el job si es necesario.
-        }
-
-        // Las actualizaciones finales de progreso (mark_complete o failed) las hace el cron job execute_background_import
-        // basado en el resultado del Handler.
-
-        $msg = sprintf(__('Sub-tanda de Posts/Páginas: %d nuevos, %d actualizados, %d omitidos.', 'md-import-force'), $new_count_local, $updated_count_local, $skipped_count_local);
+        $msg = sprintf(__('Sub-tanda de Posts/Páginas: %d nuevos, %d actualizados, %d omitidos. Items procesados en esta corrida: %d.', 'md-import-force'), 
+            $new_count_local, 
+            $updated_count_local, 
+            $skipped_count_local,
+            $items_actually_processed_this_run
+        );
         MD_Import_Force_Logger::log_message("MD Import Force [POST_IMPORTER]: " . $msg . " para import_id {$import_id}");
 
-        // Skipped items son acumulados globalmente por el Handler ahora.
-        // Aquí solo devolvemos las stats de esta tanda específica.
-        // El skipped_items_tracker es una instancia singleton, así que el Handler puede obtener el global.
-        // Sin embargo, para ZIPs, el Handler podría querer stats por archivo JSON.
-        // Por simplicidad, el Handler acumulará los skipped_items.
-
         return [
-            // 'success' => true, // El handler determinará el success general
             'new_count' => $new_count_local,
             'updated_count' => $updated_count_local,
             'skipped_count' => $skipped_count_local,
-            'media_references' => $media_references_for_queue, // Devolver las referencias de medios recopiladas
+            'items_actually_processed_this_run' => $items_actually_processed_this_run,
+            'time_exceeded' => $time_exceeded,
+            'stopped_manually' => false, // Si se detuvo manualmente, ya habría retornado antes
+            'media_references' => $media_references_for_queue,
             'message' => $msg
-            // No devolver 'skipped_items' aquí directamente, el Handler lo recuperará de $this->skipped_items_tracker globalmente si es necesario
-            // o lo acumulará a partir de los errores y skips que logueamos y contamos.
         ];
     }
 
@@ -434,7 +462,19 @@ class MD_Import_Force_Post_Importer {
         if (!empty($post_data['breadcrumb_title'])) update_post_meta($post_id, 'rank_math_breadcrumb_title', $post_data['breadcrumb_title']);
         if (!empty($post_data['meta_data']) && is_array($post_data['meta_data'])) {
             foreach ($post_data['meta_data'] as $key => $val) {
-                if (is_array($val) && isset($val['value'])) $val = $val['value']; // Handle Msls_Admin_Import - Export format
+                if (is_array($val)) {
+                    if (isset($val['value'])) { // Handle Msls_Admin_Import - Export format
+                        $val = $val['value'];
+                    } else {
+                        // For other arrays, convert to JSON string to prevent type errors with ltrim() in hooks
+                        // WordPress itself would serialize, but a hook might not expect it.
+                        // This ensures that what ltrim might receive via a hook is a string.
+                        MD_Import_Force_Logger::log_message("MD Import Force [META CONVERT WARN] Post ID {$post_id}, Meta Key '{$key}': Converting array meta value to JSON string to prevent potential ltrim errors in hooks.");
+                        $val = wp_json_encode($val);
+                    }
+                }
+                // At this point, $val is either a scalar, a string (if it was Msls format or converted from array to JSON),
+                // or it was already a scalar from the import data.
                 update_post_meta($post_id, $key, $val);
             }
         }

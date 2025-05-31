@@ -58,6 +58,49 @@ class MD_Import_Force_Handler {
     }
 
     /**
+     * Guarda el mapeo de términos en transients para persistir entre lotes
+     */
+    private function save_terms_mapping($import_id, $mapping) {
+        $cache_key = 'mdif_terms_mapping_' . md5($import_id);
+        // Guardar por 1 hora para que persista durante toda la importación
+        set_transient($cache_key, $mapping, HOUR_IN_SECONDS);
+        MD_Import_Force_Logger::log_message("MD Import Force [MAPPING CACHE]: Mapeo de términos guardado en caché para import_id: {$import_id}. Términos mapeados: " . count($mapping));
+    }
+
+    /**
+     * Recupera el mapeo de términos desde transients
+     */
+    private function load_terms_mapping($import_id) {
+        $cache_key = 'mdif_terms_mapping_' . md5($import_id);
+        $mapping = get_transient($cache_key);
+        if ($mapping && is_array($mapping)) {
+            MD_Import_Force_Logger::log_message("MD Import Force [MAPPING CACHE]: Mapeo de términos recuperado desde caché para import_id: {$import_id}. Términos mapeados: " . count($mapping));
+            return $mapping;
+        }
+        MD_Import_Force_Logger::log_message("MD Import Force [MAPPING CACHE]: No se encontró mapeo de términos en caché para import_id: {$import_id}.");
+        return [];
+    }
+
+    /**
+     * Limpia el mapeo de términos en caché
+     */
+    private function clear_terms_mapping($import_id) {
+        $cache_key = 'mdif_terms_mapping_' . md5($import_id);
+        delete_transient($cache_key);
+        MD_Import_Force_Logger::log_message("MD Import Force [MAPPING CACHE]: Mapeo de términos eliminado de caché para import_id: {$import_id}.");
+    }
+
+    /**
+     * Verifica el estado del mapeo de términos (método público para job manager)
+     */
+    public function check_terms_mapping_status($import_id) {
+        $mapping = $this->load_terms_mapping($import_id);
+        $count = count($mapping);
+        MD_Import_Force_Logger::log_message("MD Import Force [MAPPING STATUS]: Import ID {$import_id} tiene {$count} términos mapeados en caché.");
+        return $count;
+    }
+
+    /**
      * Previsualiza el contenido del archivo de importación (primer JSON en ZIP o JSON individual).
      * Muestra información del sitio de origen y los primeros registros de posts/páginas.
      */
@@ -327,15 +370,27 @@ class MD_Import_Force_Handler {
                     $this->source_site_info = $single_import_data['site_info'];
                     $this->media_handler->set_source_site_info($this->source_site_info);
                     $this->post_importer->set_source_site_info($this->source_site_info);
-                    $this->id_mapping = array();
+                    
+                    // Cargar mapeo existente de términos desde caché
+                    $this->id_mapping = $this->load_terms_mapping($import_id);
                     $this->taxonomy_importer->set_id_mapping($this->id_mapping);
                     $this->post_importer->set_id_mapping($this->id_mapping);
 
                     MD_Import_Force_Logger::log_message("MD Import Force: Info sitio origen (desde ZIP, archivo {$file_index}): " . ($this->source_site_info['site_url'] ?? 'N/A'));
 
                     MD_Import_Force_Progress_Tracker::update_status($import_id, 'processing', sprintf(__('Importando términos (archivo ZIP %d)...', 'md-import-force'), $file_index));
-                    if (!empty($single_import_data['categories'])) $this->import_terms($import_id, $single_import_data['categories'], 'category');
-                    if (!empty($single_import_data['tags'])) $this->import_terms($import_id, $single_import_data['tags'], 'post_tag');
+                    if (!empty($single_import_data['categories'])) {
+                        $this->import_terms($import_id, $single_import_data['categories'], 'category');
+                        // Actualizar el mapeo después de importar términos
+                        $this->id_mapping = array_merge($this->id_mapping, $this->taxonomy_importer->get_id_mapping());
+                        $this->post_importer->set_id_mapping($this->id_mapping);
+                    }
+                    if (!empty($single_import_data['tags'])) {
+                        $this->import_terms($import_id, $single_import_data['tags'], 'post_tag');
+                        // Actualizar el mapeo después de importar términos
+                        $this->id_mapping = array_merge($this->id_mapping, $this->taxonomy_importer->get_id_mapping());
+                        $this->post_importer->set_id_mapping($this->id_mapping);
+                    }
 
                     MD_Import_Force_Progress_Tracker::update_status($import_id, 'processing', sprintf(__('Importando posts (archivo ZIP %d)...', 'md-import-force'), $file_index));
                     
@@ -392,7 +447,9 @@ class MD_Import_Force_Handler {
                 $this->source_site_info = $import_data['site_info'];
                 $this->media_handler->set_source_site_info($this->source_site_info);
                 $this->post_importer->set_source_site_info($this->source_site_info);
-                $this->id_mapping = array();
+                
+                // Cargar mapeo existente de términos desde caché
+                $this->id_mapping = $this->load_terms_mapping($import_id);
                 $this->taxonomy_importer->set_id_mapping($this->id_mapping);
                 $this->post_importer->set_id_mapping($this->id_mapping);
 
@@ -400,8 +457,18 @@ class MD_Import_Force_Handler {
                 MD_Import_Force_Logger::log_message("MD Import Force: Mapeo IDs inicializado para import_id: {$import_id}.");
 
                 MD_Import_Force_Progress_Tracker::update_status($import_id, 'processing', __('Importando términos...', 'md-import-force'));
-                if (!empty($import_data['categories'])) $this->import_terms($import_id, $import_data['categories'], 'category');
-                if (!empty($import_data['tags'])) $this->import_terms($import_id, $import_data['tags'], 'post_tag');
+                if (!empty($import_data['categories'])) {
+                    $this->import_terms($import_id, $import_data['categories'], 'category');
+                    // Actualizar el mapeo después de importar términos
+                    $this->id_mapping = array_merge($this->id_mapping, $this->taxonomy_importer->get_id_mapping());
+                    $this->post_importer->set_id_mapping($this->id_mapping);
+                }
+                if (!empty($import_data['tags'])) {
+                    $this->import_terms($import_id, $import_data['tags'], 'post_tag');
+                    // Actualizar el mapeo después de importar términos
+                    $this->id_mapping = array_merge($this->id_mapping, $this->taxonomy_importer->get_id_mapping());
+                    $this->post_importer->set_id_mapping($this->id_mapping);
+                }
 
                 MD_Import_Force_Progress_Tracker::update_status($import_id, 'processing', __('Importando posts...', 'md-import-force'));
                 $result_single = $this->post_importer->import_posts(
@@ -458,6 +525,9 @@ class MD_Import_Force_Handler {
             );
 
         } catch (Exception $e) {
+            // Limpiar el mapeo de términos en caso de error
+            $this->clear_terms_mapping($import_id);
+            
             MD_Import_Force_Logger::log_message("MD Import Force [HANDLER START_IMPORT ERROR FATAL] para import_id: {$import_id}. Mensaje: " . $e->getMessage() . " Traza: " . $e->getTraceAsString());
             return array(
                 'success' => false, 
@@ -470,6 +540,9 @@ class MD_Import_Force_Handler {
                 'skipped_items' => $this->skipped_items_tracker->get_skipped_items(),
                 'error_details' => $e->getTraceAsString()
             );
+        } finally {
+            // Siempre limpiar el mapeo de términos al final de la importación
+            $this->clear_terms_mapping($import_id);
         }
     }
 
@@ -498,10 +571,51 @@ class MD_Import_Force_Handler {
      * (Esta función también podría necesitar pasar $import_id si se quiere loguear progreso de términos)
      */
     private function import_terms($import_id, $terms_data, $taxonomy) {
-        MD_Import_Force_Logger::log_message("MD Import Force [HANDLER IMPORT_TERMS]: Importando " . count($terms_data) . " términos para taxonomía {$taxonomy}, import_id: {$import_id}.");
+        MD_Import_Force_Logger::log_message("MD Import Force [HANDLER IMPORT_TERMS]: Iniciando importación de " . count($terms_data) . " términos para taxonomía {$taxonomy}, import_id: {$import_id}.");
         
-        $this->id_mapping = $this->taxonomy_importer->import_terms($terms_data, $taxonomy); 
-        return $this->id_mapping;
+        // Verificar qué términos ya están en el mapeo
+        $existing_mapping = $this->load_terms_mapping($import_id);
+        $prefix = $taxonomy . '_';
+        $terms_to_process = [];
+        $skipped_count = 0;
+        
+        foreach ($terms_data as $term_data) {
+            $term_id = $term_data['term_id'] ?? 0;
+            if ($term_id > 0) {
+                // Verificar si ya está mapeado (con y sin prefijo)
+                $already_mapped = isset($existing_mapping[$prefix . $term_id]) || isset($existing_mapping[$term_id]);
+                if (!$already_mapped) {
+                    $terms_to_process[] = $term_data;
+                } else {
+                    $skipped_count++;
+                }
+            }
+        }
+        
+        if ($skipped_count > 0) {
+            MD_Import_Force_Logger::log_message("MD Import Force [HANDLER IMPORT_TERMS]: Omitiendo {$skipped_count} términos ya procesados para taxonomía {$taxonomy}.");
+        }
+        
+        if (empty($terms_to_process)) {
+            MD_Import_Force_Logger::log_message("MD Import Force [HANDLER IMPORT_TERMS]: Todos los términos para taxonomía {$taxonomy} ya están procesados. Saltando.");
+            return $existing_mapping;
+        }
+        
+        MD_Import_Force_Logger::log_message("MD Import Force [HANDLER IMPORT_TERMS]: Procesando " . count($terms_to_process) . " términos nuevos para taxonomía {$taxonomy}.");
+        
+        // Importar solo los términos que necesitan procesamiento
+        $new_mapping = $this->taxonomy_importer->import_terms($terms_to_process, $taxonomy);
+        
+        // Combinar el mapeo existente con el nuevo
+        $combined_mapping = array_merge($existing_mapping, $new_mapping);
+        
+        // Guardar el mapeo combinado
+        $this->save_terms_mapping($import_id, $combined_mapping);
+        
+        // Actualizar el mapeo local
+        $this->id_mapping = $combined_mapping;
+        
+        return $combined_mapping;
     }
 
     /**
@@ -599,18 +713,36 @@ class MD_Import_Force_Handler {
      * @param int &$current_processed_count Contador actual de elementos procesados (referencia global para esta fase de posts)
      * @param int $total_items Total de elementos a procesar (en esta fase de posts)
      * @param string $import_run_guid GUID único para toda la ejecución de esta importación
+     * @param int $batch_run_start_time Timestamp de cuándo comenzó el procesamiento del lote actual del Job Manager.
+     * @param int $time_limit_for_this_run Tiempo máximo en segundos para esta ejecución del lote.
      * @return array Resultado del procesamiento del lote
      */
-    public function process_batch($import_id, $options, $import_data, $start_index, $batch_size, &$current_processed_count, $total_items, $import_run_guid) {
-        MD_Import_Force_Logger::log_message("MD Import Force [HANDLER BATCH]: Procesando lote para import_id: {$import_id}, GUID: {$import_run_guid}, inicio: {$start_index}, tamaño: {$batch_size}");
+    public function process_batch(
+        $import_id, 
+        $options, 
+        $import_data, // Full data for the import phase (e.g., from temp file)
+        $current_batch_start_index, // Global start index for items this Action Scheduler job is meant to process
+        $current_batch_size,      // Number of items this Action Scheduler job is meant to process from the global list
+        &$overall_processed_count_ref, 
+        $total_items, 
+        $import_run_guid,
+        $batch_run_start_time,
+        $time_limit_for_this_run
+    ) {
+        // Monitoreo inicial de memoria
+        $memory_start = memory_get_usage(true);
+        $memory_peak_start = memory_get_peak_usage(true);
         
-        // Verificar si se ha solicitado detener las importaciones (global o específica)
+        MD_Import_Force_Logger::log_message("MD Import Force [HANDLER BATCH]: GUID: {$import_run_guid}, ImportID: {$import_id}, Lote inicia en índice global: {$current_batch_start_index}, tamaño solicitado para este job: {$current_batch_size}. Tiempo límite: {$time_limit_for_this_run}s. Memoria inicial: " . size_format($memory_start));
+        
+        // Limpieza de memoria al inicio
+        $this->cleanup_handler_memory();
+        
         if (get_option('md_import_force_stop_all_imports_requested', false) || get_transient('md_import_force_stop_request_' . $import_id)) {
             $stop_reason = get_transient('md_import_force_stop_request_' . $import_id)
                 ? "solicitud específica para import_id {$import_id}"
                 : "solicitud global";
-                
-            MD_Import_Force_Logger::log_message("MD Import Force [STOP REQUESTED]: Lote detenido por {$stop_reason} al inicio del método process_batch.");
+            MD_Import_Force_Logger::log_message("MD Import Force [STOP REQUESTED]: Lote detenido por {$stop_reason} al inicio de Handler::process_batch.");
             MD_Import_Force_Progress_Tracker::update_status(
                 $import_id,
                 'stopped',
@@ -621,160 +753,271 @@ class MD_Import_Force_Handler {
                 'new_count' => 0,
                 'updated_count' => 0,
                 'skipped_count' => 0,
-                'processed_count' => $current_processed_count,
-                'total_count' => $total_items,
+                'items_actually_processed_this_run' => 0,
+                'time_exceeded' => false,
                 'stopped_manually' => true,
+                'processed_count_overall' => $overall_processed_count_ref,
                 'message' => __('Importación detenida por solicitud del usuario.', 'md-import-force')
             ];
         }
         
-        // Inicializar contadores para este lote
-        $batch_new_count = 0;
-        $batch_updated_count = 0;
-        $batch_skipped_count = 0;
-        
-        // Si es un ZIP con múltiples archivos JSON
-        if (is_array($import_data) && isset($import_data[0])) {
-            // Lógica para procesar un lote de un ZIP con múltiples archivos JSON
-            // Esta lógica es más compleja y puede requerir un seguimiento del progreso entre archivos
-            // Implementación simplificada:
+        $batch_items_for_this_call = [];
+        $current_file_data_for_batch = null; // Used if ZIP
+
+        // Determine the actual items to process in THIS specific call to import_posts
+        // This logic needs to correctly slice the $import_data based on $current_batch_start_index and $current_batch_size
+        // $import_data is the full dataset (e.g. content of the temp file, which could be an array of file contents for a ZIP)
+
+        if (is_array($import_data) && isset($import_data[0]['site_info']) && isset($import_data[0]['posts'])) {
+            // Handle ZIP: $import_data is an array of [ 'site_info' => ..., 'posts' => ..., 'categories' => ..., 'tags' => ... ]
+            MD_Import_Force_Logger::log_message("MD Import Force [HANDLER BATCH]: Procesando ZIP. Buscando items para índice global {$current_batch_start_index}, tamaño {$current_batch_size}.");
             
-            // Encontrar qué archivo JSON del ZIP y qué elementos procesar
-            $total_processed_so_far = 0;
-            $current_file_index = 0;
-            $elements_in_current_file = 0;
-            
-            // Recorrer los archivos hasta encontrar dónde está el índice actual
-            foreach ($import_data as $file_index => $single_import_data) {
-                $elements_in_file = isset($single_import_data['posts']) ? count($single_import_data['posts']) : 0;
-                
-                if ($total_processed_so_far + $elements_in_file > $start_index) {
-                    // Este es el archivo que contiene nuestro índice de inicio
-                    $current_file_index = $file_index;
-                    $elements_in_current_file = $elements_in_file;
-                    break;
-                }
-                
-                $total_processed_so_far += $elements_in_file;
-            }
-            
-            // Calcular el índice de inicio dentro del archivo actual
-            $file_start_index = $start_index - $total_processed_so_far;
-            
-            // Calcular cuántos elementos procesar en este archivo
-            $elements_to_process = min($batch_size, $elements_in_current_file - $file_start_index);
-            
-            // Obtener el subconjunto de elementos a procesar
-            $current_file_data = $import_data[$current_file_index];
-            $batch_items = array_slice($current_file_data['posts'], $file_start_index, $elements_to_process);
-            
-            // Configurar el importer con la información del sitio de origen
-            $this->source_site_info = $current_file_data['site_info'];
-            $this->media_handler->set_source_site_info($this->source_site_info);
-            $this->post_importer->set_source_site_info($this->source_site_info);
-            
-            // Procesar los términos de taxonomía primero si es el primer lote de este archivo
-            if ($file_start_index == 0) {
-                if (!empty($current_file_data['categories'])) $this->import_terms($import_id, $current_file_data['categories'], 'category');
-                if (!empty($current_file_data['tags'])) $this->import_terms($import_id, $current_file_data['tags'], 'post_tag');
-            }
-            
-            // Ahora procesar los posts del lote
-            $batch_result = $this->post_importer->import_posts(
-                $batch_items,
-                $import_id,
-                $options,
-                $current_processed_count, // Referencia que será actualizada por import_posts
-                $total_items
-            );
-            
-            // --- INICIO: Guardar referencias de medios en la cola ---
-            if (isset($batch_result['media_references']) && is_array($batch_result['media_references'])) {
-                $media_refs_count = count($batch_result['media_references']);
-                if ($media_refs_count > 0) {
-                    MD_Import_Force_Logger::log_message("MD Import Force [HANDLER BATCH]: Se encontraron {$media_refs_count} referencias de medios para GUID: {$import_run_guid}, Lote con inicio: {$start_index}. Guardando en cola...");
-                    foreach ($batch_result['media_references'] as $ref) {
-                        MD_Import_Force_Media_Queue_Manager::add_item(
-                            $import_run_guid,
-                            $ref['post_id'],
-                            $ref['original_post_id_from_file'],
-                            $ref['media_type'],
-                            $ref['original_url']
-                        );
+            $cumulative_item_count = 0;
+            $items_collected_for_this_run = [];
+            $zip_file_processed_terms = []; // Track per-file term processing: [file_hash => true]
+
+            foreach ($import_data as $file_content_index => $single_file_data) {
+                if (!isset($single_file_data['posts']) || !is_array($single_file_data['posts'])) continue;
+
+                $posts_in_this_file = $single_file_data['posts'];
+                $count_in_this_file = count($posts_in_this_file);
+
+                // Check if this file is relevant for the current_batch_start_index and current_batch_size
+                if ($cumulative_item_count + $count_in_this_file > $current_batch_start_index) {
+                    $start_in_this_file = max(0, $current_batch_start_index - $cumulative_item_count);
+                    $num_to_take_from_this_file = min(
+                        $count_in_this_file - $start_in_this_file, // available in this file from start_in_this_file
+                        $current_batch_size - count($items_collected_for_this_run) // remaining needed for this job
+                    );
+
+                    if ($num_to_take_from_this_file > 0) {
+                        $items_slice_from_file = array_slice($posts_in_this_file, $start_in_this_file, $num_to_take_from_this_file);
+                        $items_collected_for_this_run = array_merge($items_collected_for_this_run, $items_slice_from_file);
+                        
+                        // Set source_site_info from the FIRST file that contributes items to this batch
+                        if (empty($this->source_site_info) && isset($single_file_data['site_info'])) {
+                            $this->source_site_info = $single_file_data['site_info'];
+                             MD_Import_Force_Logger::log_message("MD Import Force [HANDLER BATCH]: Site info establecida desde archivo ZIP índice {$file_content_index}.");
+                        }
+
+                        // Process terms for this part of the ZIP file if it's the beginning of processing *this specific file's content*
+                        // and this batch is starting at the beginning of this file's items.
+                        $file_hash_for_terms = md5(json_encode($single_file_data['site_info'])); // Unique ID for this file within zip
+                        if ($start_in_this_file == 0 && !isset($zip_file_processed_terms[$file_hash_for_terms])) {
+                            MD_Import_Force_Logger::log_message("MD Import Force [HANDLER BATCH]: Procesando términos para archivo ZIP índice {$file_content_index} (hash: {$file_hash_for_terms}).");
+                            
+                            // Limpieza de memoria antes de procesar términos
+                            $this->cleanup_handler_memory();
+                            
+                            $this->id_mapping = $this->load_terms_mapping($import_id); // Load fresh before term import
+                            $this->taxonomy_importer->set_id_mapping($this->id_mapping);
+                            $this->post_importer->set_id_mapping($this->id_mapping); // Ensure post importer also has it
+
+                            if (!empty($single_file_data['categories'])) {
+                                $this->import_terms($import_id, $single_file_data['categories'], 'category');
+                                $this->id_mapping = array_merge($this->id_mapping, $this->taxonomy_importer->get_id_mapping());
+                                // Limpieza intermedia
+                                $this->cleanup_handler_memory();
+                            }
+                            if (!empty($single_file_data['tags'])) {
+                                $this->import_terms($import_id, $single_file_data['tags'], 'post_tag');
+                                $this->id_mapping = array_merge($this->id_mapping, $this->taxonomy_importer->get_id_mapping());
+                                // Limpieza intermedia
+                                $this->cleanup_handler_memory();
+                            }
+                            $this->save_terms_mapping($import_id, $this->id_mapping); // Save updated mapping
+                            $zip_file_processed_terms[$file_hash_for_terms] = true;
+                        }
                     }
                 }
+                $cumulative_item_count += $count_in_this_file;
+                if (count($items_collected_for_this_run) >= $current_batch_size) {
+                    break; // Collected enough items for this job
+                }
             }
-            // --- FIN: Guardar referencias de medios en la cola ---
+            $batch_items_for_this_call = $items_collected_for_this_run;
+            if (empty($this->source_site_info) && isset($import_data[0]['site_info'])) { // Fallback if somehow not set
+                 $this->source_site_info = $import_data[0]['site_info'];
+            }
 
-            $batch_new_count = $batch_result['new_count'] ?? 0;
-            $batch_updated_count = $batch_result['updated_count'] ?? 0;
-            $batch_skipped_count = $batch_result['skipped_count'] ?? 0;
-            
-        } else {
-            // Caso más simple: un solo archivo JSON (ya no debería ser manejado directamente por process_batch si JobManager siempre guarda en $data_id)
-            // Esta lógica probablemente se simplificará o se moverá si JobManager SIEMPRE usa un archivo de datos temporal.
-            // Por ahora, asumimos que $import_data aquí es el contenido del archivo temporal, que es un array de posts.
-
-            $batch_items = array_slice($import_data['posts'], $start_index, $batch_size);
-            
-            // Configurar el importer con la información del sitio de origen
+        } elseif (isset($import_data['posts']) && isset($import_data['site_info'])) { // Single JSON structure
+            MD_Import_Force_Logger::log_message("MD Import Force [HANDLER BATCH]: Procesando JSON único. Índice global {$current_batch_start_index}, tamaño {$current_batch_size}.");
             $this->source_site_info = $import_data['site_info'];
-            $this->media_handler->set_source_site_info($this->source_site_info);
-            $this->post_importer->set_source_site_info($this->source_site_info);
             
-            // Procesar los términos de taxonomía primero si es el primer lote
-            if ($start_index == 0) {
-                if (!empty($import_data['categories'])) $this->import_terms($import_id, $import_data['categories'], 'category');
-                if (!empty($import_data['tags'])) $this->import_terms($import_id, $import_data['tags'], 'post_tag');
-            }
-            
-            // Ahora procesar los posts del lote
-            $batch_result = $this->post_importer->import_posts(
-                $batch_items,
-                $import_id,
-                $options,
-                $current_processed_count, // Referencia que será actualizada por import_posts
-                $total_items
-            );
+            // Term processing only if this batch starts at the very beginning of the file (global index 0)
+            if ($current_batch_start_index == 0) {
+                MD_Import_Force_Logger::log_message("MD Import Force [HANDLER BATCH]: Procesando términos para JSON único (inicio de archivo).");
+                
+                // Limpieza de memoria antes de procesar términos
+                $this->cleanup_handler_memory();
+                
+                $this->id_mapping = $this->load_terms_mapping($import_id); // Load fresh
+                $this->taxonomy_importer->set_id_mapping($this->id_mapping);
+                 $this->post_importer->set_id_mapping($this->id_mapping);
 
-            // --- INICIO: Guardar referencias de medios en la cola (para el caso de JSON único) ---
-            if (isset($batch_result['media_references']) && is_array($batch_result['media_references'])) {
-                $media_refs_count = count($batch_result['media_references']);
-                if ($media_refs_count > 0) {
-                    MD_Import_Force_Logger::log_message("MD Import Force [HANDLER BATCH - JSON Único]: Se encontraron {$media_refs_count} referencias de medios para GUID: {$import_run_guid}. Guardando en cola...");
-                    foreach ($batch_result['media_references'] as $ref) {
-                        MD_Import_Force_Media_Queue_Manager::add_item(
-                            $import_run_guid,
-                            $ref['post_id'],
-                            $ref['original_post_id_from_file'],
-                            $ref['media_type'],
-                            $ref['original_url']
-                        );
-                    }
+                if (!empty($import_data['categories'])) {
+                    $this->import_terms($import_id, $import_data['categories'], 'category');
+                    $this->id_mapping = array_merge($this->id_mapping, $this->taxonomy_importer->get_id_mapping());
+                    // Limpieza intermedia
+                    $this->cleanup_handler_memory();
+                }
+                if (!empty($import_data['tags'])) {
+                    $this->import_terms($import_id, $import_data['tags'], 'post_tag');
+                    $this->id_mapping = array_merge($this->id_mapping, $this->taxonomy_importer->get_id_mapping());
+                    // Limpieza intermedia
+                    $this->cleanup_handler_memory();
+                }
+                 $this->save_terms_mapping($import_id, $this->id_mapping); // Save updated mapping
+            }
+            // Slice the posts from the single JSON data based on global start index and batch size for this job
+            $batch_items_for_this_call = array_slice($import_data['posts'], $current_batch_start_index, $current_batch_size);
+
+        } else {
+            MD_Import_Force_Logger::log_message("MD Import Force [HANDLER BATCH ERROR]: Estructura de import_data inválida. ImportID: {$import_id}");
+            return [
+                'success' => false, 'new_count' => 0, 'updated_count' => 0, 'skipped_count' => 0,
+                'items_actually_processed_this_run' => 0, 'time_exceeded' => false, 'stopped_manually' => false,
+                'processed_count_overall' => $overall_processed_count_ref,
+                'message' => __('Error: Formato de datos de importación inválido.', 'md-import-force')
+            ];
+        }
+
+        if (empty($batch_items_for_this_call)) {
+             MD_Import_Force_Logger::log_message("MD Import Force [HANDLER BATCH WARN]: No se prepararon items para procesar para el índice global {$current_batch_start_index}, tamaño {$current_batch_size}. ImportID: {$import_id}. Esto puede ser normal si es el final de la importación y el último lote es más pequeño.");
+            return [
+                'success' => true, 'new_count' => 0, 'updated_count' => 0, 'skipped_count' => 0,
+                'items_actually_processed_this_run' => 0,
+                'time_exceeded' => false,
+                'stopped_manually' => false,
+                'processed_count_overall' => $overall_processed_count_ref,
+                'message' => __('No hay más items en este lote para procesar.', 'md-import-force')
+            ];
+        }
+        MD_Import_Force_Logger::log_message("MD Import Force [HANDLER BATCH]: Preparados " . count($batch_items_for_this_call) . " items para procesar en esta corrida. ImportID: {$import_id}");
+
+        // Limpieza de memoria antes del procesamiento principal
+        $this->cleanup_handler_memory();
+        
+        // Verificar memoria disponible antes de continuar
+        $memory_before_posts = memory_get_usage(true);
+        $memory_limit = ini_get('memory_limit');
+        $memory_limit_bytes = $this->convert_memory_limit_to_bytes($memory_limit);
+        $memory_usage_ratio = $memory_before_posts / $memory_limit_bytes;
+        
+        if ($memory_usage_ratio > 0.8) { // Si estamos usando más del 80% de memoria
+            MD_Import_Force_Logger::log_message("MD Import Force [HANDLER BATCH WARNING]: Uso de memoria alto (" . round($memory_usage_ratio * 100, 2) . "%) antes del procesamiento de posts. Memoria: " . size_format($memory_before_posts));
+            // Reducir el tamaño del lote dinámicamente
+            if (count($batch_items_for_this_call) > 1) {
+                $reduced_size = max(1, floor(count($batch_items_for_this_call) / 2));
+                $batch_items_for_this_call = array_slice($batch_items_for_this_call, 0, $reduced_size);
+                MD_Import_Force_Logger::log_message("MD Import Force [HANDLER BATCH]: Tamaño de lote reducido a {$reduced_size} items por uso alto de memoria.");
+            }
+        }
+
+        // Ensure handlers have the latest site_info and id_mapping
+        $this->media_handler->set_source_site_info($this->source_site_info);
+        $this->post_importer->set_source_site_info($this->source_site_info);
+        
+        // Load/refresh ID mapping before post import, as terms might have been processed above
+        $this->id_mapping = $this->load_terms_mapping($import_id);
+        $this->taxonomy_importer->set_id_mapping($this->id_mapping); // Though terms are done for this batch start
+        $this->post_importer->set_id_mapping($this->id_mapping);
+
+
+        $post_importer_result = $this->post_importer->import_posts(
+            $batch_items_for_this_call,
+            $import_id,
+            $options,
+            $overall_processed_count_ref, // Pass by reference
+            $total_items,
+            $batch_run_start_time,    // Pass through from Job Manager
+            $time_limit_for_this_run  // Pass through from Job Manager
+        );
+        
+        // Limpieza de memoria después del procesamiento de posts
+        $this->cleanup_handler_memory();
+        
+        if (isset($post_importer_result['media_references']) && is_array($post_importer_result['media_references'])) {
+            $media_refs_count = count($post_importer_result['media_references']);
+            if ($media_refs_count > 0) {
+                MD_Import_Force_Logger::log_message("MD Import Force [HANDLER BATCH]: Se encontraron {$media_refs_count} referencias de medios para GUID: {$import_run_guid}. Guardando en cola...");
+                foreach ($post_importer_result['media_references'] as $ref) {
+                    MD_Import_Force_Media_Queue_Manager::add_item(
+                        $import_run_guid,
+                        $ref['post_id'],
+                        $ref['original_post_id_from_file'],
+                        $ref['media_type'],
+                        $ref['original_url']
+                    );
                 }
             }
-            // --- FIN: Guardar referencias de medios en la cola ---
-            
-            $batch_new_count = $batch_result['new_count'] ?? 0;
-            $batch_updated_count = $batch_result['updated_count'] ?? 0;
-            $batch_skipped_count = $batch_result['skipped_count'] ?? 0;
         }
         
-        // Verificar si hubo solicitud de detención durante el procesamiento
-        if (isset($batch_result['stopped_manually']) && $batch_result['stopped_manually']) {
-            return $batch_result; // Devolver el resultado que incluye la marca de detención
+        // Monitoreo final de memoria
+        $memory_end = memory_get_usage(true);
+        $memory_peak_end = memory_get_peak_usage(true);
+        
+        MD_Import_Force_Logger::log_message("MD Import Force [HANDLER BATCH]: Lote completado. Items procesados: " . ($post_importer_result['items_actually_processed_this_run'] ?? 0) . ". Memoria final: " . size_format($memory_end) . ", Pico: " . size_format($memory_peak_end) . ", Diferencia: " . size_format($memory_end - $memory_start));
+        
+        return $post_importer_result;
+    }
+
+    private function cleanup_handler_memory() {
+        // Forzar liberación de memoria PHP
+        if (function_exists('gc_collect_cycles')) {
+            $cycles_freed = gc_collect_cycles();
+            if ($cycles_freed > 0) {
+                MD_Import_Force_Logger::log_message("MD Import Force [HANDLER MEMORY]: Liberados {$cycles_freed} ciclos de memoria en handler.");
+            }
         }
         
-        // Devolver los resultados del lote
-        return [
-            'success' => true,
-            'new_count' => $batch_new_count,
-            'updated_count' => $batch_updated_count,
-            'skipped_count' => $batch_skipped_count,
-            'processed_count' => $current_processed_count,
-            'total_count' => $total_items,
-            'message' => sprintf(__('Lote procesado: %d nuevos, %d actualizados, %d omitidos.', 'md-import-force'), 
-                            $batch_new_count, $batch_updated_count, $batch_skipped_count)
-        ];
+        // Limpiar cache de WordPress
+        wp_cache_flush();
+        
+        // Limpiar variables globales que podrían estar cargadas
+        global $wp_object_cache, $wpdb;
+        
+        if (isset($wp_object_cache) && is_object($wp_object_cache)) {
+            if (method_exists($wp_object_cache, 'flush')) {
+                $wp_object_cache->flush();
+            }
+        }
+        
+        // Limpiar cache de base de datos
+        if (isset($wpdb) && is_object($wpdb)) {
+            $wpdb->flush();
+        }
+        
+        // Limpiar arrays grandes del handler si existen
+        if (isset($this->id_mapping) && is_array($this->id_mapping) && count($this->id_mapping) > 1000) {
+            // Solo limpiar si el mapeo es muy grande, pero recargar después si es necesario
+            MD_Import_Force_Logger::log_message("MD Import Force [HANDLER MEMORY]: ID mapping muy grande (" . count($this->id_mapping) . " items), considerando optimización.");
+        }
+    }
+
+    private function convert_memory_limit_to_bytes($memory_limit) {
+        if (empty($memory_limit) || $memory_limit == '-1') {
+            // Sin límite de memoria
+            return PHP_INT_MAX;
+        }
+        
+        $memory_limit = trim($memory_limit);
+        $unit = strtolower(substr($memory_limit, -1));
+        $size = (int) substr($memory_limit, 0, -1);
+        
+        switch ($unit) {
+            case 'g':
+                $size *= 1024;
+            case 'm':
+                $size *= 1024;
+            case 'k':
+                $size *= 1024;
+                break;
+            default:
+                // Asumir que ya está en bytes si no hay unidad
+                $size = (int) $memory_limit;
+        }
+        
+        return $size;
     }
 } // Fin clase

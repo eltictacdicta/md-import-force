@@ -35,6 +35,30 @@ if (!defined('ABSPATH')) {
                             <?php _e('Importar solo los posts que faltan (omitir los que ya existen por título y tipo)', 'md-import-force'); ?>
                         </label>
                         <p class="description"><?php _e('Útil si una importación anterior fue parcial o si quieres asegurarte de no duplicar contenido ya existente.', 'md-import-force'); ?></p>
+                        
+                        <label for="handle_attachments" style="margin-top: 10px; display: block;">
+                            <input type="checkbox" id="handle_attachments" name="handle_attachments" value="1" checked>
+                            <?php _e('Manejar Adjuntos (procesar medios e imágenes)', 'md-import-force'); ?>
+                        </label>
+                        <p class="description"><?php _e('Activa esta opción para importar archivos de medios, imágenes destacadas y crear attachments en WordPress.', 'md-import-force'); ?></p>
+                        
+                        <label for="generate_thumbnails" style="margin-top: 10px; display: block;">
+                            <input type="checkbox" id="generate_thumbnails" name="generate_thumbnails" value="1">
+                            <?php _e('Generar miniaturas automáticamente', 'md-import-force'); ?>
+                        </label>
+                        <p class="description"><?php _e('Genera automáticamente miniaturas para las imágenes importadas.', 'md-import-force'); ?></p>
+                        
+                        <label for="force_ids" style="margin-top: 10px; display: block;">
+                            <input type="checkbox" id="force_ids" name="force_ids" value="1">
+                            <?php _e('Forzar IDs originales', 'md-import-force'); ?>
+                        </label>
+                        <p class="description"><?php _e('Intenta mantener los IDs de posts originales (puede causar conflictos si ya existen).', 'md-import-force'); ?></p>
+                        
+                        <label for="force_author" style="margin-top: 10px; display: block;">
+                            <input type="checkbox" id="force_author" name="force_author" value="1">
+                            <?php _e('Forzar autores originales', 'md-import-force'); ?>
+                        </label>
+                        <p class="description"><?php _e('Mantiene los autores originales de los posts (crea usuarios si no existen).', 'md-import-force'); ?></p>
                     </div>
 
                     <div class="submit-button">

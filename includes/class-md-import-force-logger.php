@@ -83,22 +83,24 @@ class MD_Import_Force_Logger {
         $log_path = __DIR__ . '/../logs/md-import-force.log';
 
         if (!file_exists($log_path)) {
-            self::log_message(__('El archivo de log no fue encontrado en la ruta esperada: ', 'md-import-force') . $log_path);
+            // Use error_log instead of self::log_message to avoid circular dependency
+            error_log('MD Import Force: Log file not found at path: ' . $log_path);
             return new WP_Error('log_not_found', __('El archivo de log no fue encontrado en la ruta esperada: ', 'md-import-force') . $log_path);
         }
 
         if (!is_writable($log_path)) {
-            self::log_message(__('No tienes permisos para escribir en el archivo de log en la ruta: ', 'md-import-force') . $log_path);
+            // Use error_log instead of self::log_message to avoid circular dependency
+            error_log('MD Import Force: Log file not writable at path: ' . $log_path);
             return new WP_Error('permission_denied', __('No tienes permisos para escribir en el archivo de log.', 'md-import-force'));
         }
 
         if (file_put_contents($log_path, '') === false) {
-            self::log_message(__('No se pudo limpiar el archivo de log en la ruta: ', 'md-import-force') . $log_path);
+            // Use error_log instead of self::log_message to avoid circular dependency
+            error_log('MD Import Force: Failed to clear log file at path: ' . $log_path);
             return new WP_Error('clear_failed', __('No se pudo limpiar el archivo de log.', 'md-import-force'));
         }
 
-        // Loggear la limpieza exitosa
-        self::log_message(__('Log de errores limpiado con éxito.', 'md-import-force'));
+        // Log file cleared successfully - no need to log this to prevent FastCGI errors
 
         return array('success' => true, 'message' => __('Log de errores limpiado con éxito.', 'md-import-force'));
     }

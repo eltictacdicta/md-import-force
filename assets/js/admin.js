@@ -194,9 +194,15 @@ document.addEventListener('DOMContentLoaded', function() {
             const onlyMissingCheckbox = document.getElementById('import_only_missing');
 
             if (optionsWrapper && onlyMissingCheckbox) {
-                if (previewData.total_existing_in_file > 0 && previewData.total_missing_in_file > 0) {
+                if (previewData.total_missing_in_file > 0) {
+                    // Mostrar opciones cuando hay posts para importar
                     optionsWrapper.style.display = 'block';
-                    onlyMissingCheckbox.checked = true; // Marcar por defecto si la situación lo amerita
+                    // Solo marcar "import_only_missing" si hay posts existentes y faltantes
+                    if (previewData.total_existing_in_file > 0 && previewData.total_missing_in_file > 0) {
+                        onlyMissingCheckbox.checked = true;
+                    } else {
+                        onlyMissingCheckbox.checked = false;
+                    }
                 } else {
                     optionsWrapper.style.display = 'none';
                     onlyMissingCheckbox.checked = false;
@@ -292,7 +298,7 @@ document.addEventListener('DOMContentLoaded', function() {
             // if (otherOption) payload.other_option = otherOption;
             
             // >>> OBTENER TODAS LAS OPCIONES DEL FORMULARIO (checkboxes) <<<
-            const optionsCheckboxes = document.querySelectorAll('#md-import-force-options input[type="checkbox"]');
+            const optionsCheckboxes = document.querySelectorAll('#md-import-force-options-wrapper input[type="checkbox"]');
             optionsCheckboxes.forEach(checkbox => {
                 // Usa el 'name' del checkbox como clave en el payload
                 // y su estado 'checked' (true/false) como valor, convertido a '1' o '0'.
@@ -314,6 +320,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
             let progressCheckInterval = null;
             let importCompletedProcessed = false;
+
+            // Variables para manejar reintentos en caso de errores 504
+            var progressCheckRetryCount = 0;
+            var maxProgressCheckRetries = 5;
+            var progressCheckRetryDelay = 2000; // 2 segundos inicial
+            var maxProgressCheckDelay = 30000; // Máximo 30 segundos entre verificaciones
 
             apiFetch('import', {
                 method: 'POST',
@@ -357,6 +369,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     method: 'GET'
                 })
                 .then(progressData => {
+                    // Resetear contador de reintentos en caso de éxito
+                    progressCheckRetryCount = 0;
+                    progressCheckRetryDelay = 2000;
+                    
                     if (importCompletedProcessed && progressData.status === 'completed' && progressData.percent === 100) {
                         return;
                     }
@@ -371,6 +387,49 @@ document.addEventListener('DOMContentLoaded', function() {
                 })
                 .catch(error => {
                     console.error('Error al verificar progreso:', error.message);
+                    
+                    // Manejar errores 504 específicamente
+                    if (error.message.includes('504') || error.message.includes('Gateway Timeout')) {
+                        progressCheckRetryCount++;
+                        
+                        if (progressCheckRetryCount <= maxProgressCheckRetries) {
+                            console.log(`Error 504 detectado. Reintento ${progressCheckRetryCount}/${maxProgressCheckRetries} en ${progressCheckRetryDelay}ms`);
+                            
+                            // Mostrar mensaje informativo al usuario
+                            const currentItemElement = document.getElementById('md-import-force-current-item');
+                            if (currentItemElement) {
+                                currentItemElement.textContent = `El servidor está ocupado (error 504). Reintentando verificación en ${progressCheckRetryDelay/1000}s... (${progressCheckRetryCount}/${maxProgressCheckRetries})`;
+                            }
+                            
+                            // Programar reintento con delay progresivo
+                            setTimeout(() => {
+                                checkImportProgress();
+                            }, progressCheckRetryDelay);
+                            
+                            // Aumentar el delay para el próximo reintento (backoff exponencial)
+                            progressCheckRetryDelay = Math.min(progressCheckRetryDelay * 1.5, maxProgressCheckDelay);
+                        } else {
+                            // Demasiados reintentos, mostrar error pero continuar verificando más lentamente
+                            console.warn('Demasiados errores 504 consecutivos. Continuando con verificaciones menos frecuentes.');
+                            
+                            const currentItemElement = document.getElementById('md-import-force-current-item');
+                            if (currentItemElement) {
+                                currentItemElement.textContent = 'El servidor está sobrecargado. Verificando progreso con menos frecuencia...';
+                            }
+                            
+                            // Cambiar a verificaciones menos frecuentes
+                            clearInterval(progressCheckInterval);
+                            progressCheckInterval = setInterval(checkImportProgress, 15000); // Cada 15 segundos
+                            progressCheckRetryCount = 0; // Resetear para el próximo ciclo
+                            progressCheckRetryDelay = 5000; // Delay más largo para cuando recomience
+                        }
+                    } else {
+                        // Para otros tipos de errores, manejar normalmente
+                        const currentItemElement = document.getElementById('md-import-force-current-item');
+                        if (currentItemElement) {
+                            currentItemElement.textContent = `Error verificando progreso: ${error.message}`;
+                        }
+                    }
                 });
             }
 

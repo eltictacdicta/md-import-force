@@ -208,7 +208,14 @@ class MD_Import_Force_Taxonomy_Importer {
      * Asigna términos
      */
     public function assign_terms($post_id, $original_ids, $tax) {
-        if (empty($original_ids) || !is_array($original_ids)) return; $new_ids = []; $prefix = $tax . '_';
+        if (empty($original_ids) || !is_array($original_ids)) return; 
+        
+        $new_ids_all = []; 
+        $prefix = $tax . '_';
+        $found_count_total = 0;
+        $not_found_count_total = 0;
+        $total_mapping_entries = count($this->id_mapping);
+        
         foreach ($original_ids as $old) {
             $old = intval($old);
             if ($old <= 0) continue;
@@ -219,13 +226,51 @@ class MD_Import_Force_Taxonomy_Importer {
             // Si no se encuentra con prefijo, intentar sin prefijo
             if (!$new) $new = $this->get_mapped_id($old);
 
-            if ($new) $new_ids[] = intval($new);
-            else MD_Import_Force_Logger::log_message("MD Import Force [WARN] Post ID {$post_id}: No se encontró mapeo para término {$old} ({$tax}).");
+            if ($new) {
+                $new_ids_all[] = intval($new);
+                $found_count_total++;
+                // MD_Import_Force_Logger::log_message("MD Import Force [DEBUG] Post ID {$post_id}: Término {$old} ({$tax}) mapeado a {$new}."); // Reduced verbosity
+            } else {
+                $not_found_count_total++;
+                MD_Import_Force_Logger::log_message("MD Import Force [WARN] Post ID {$post_id}: No se encontró mapeo para término {$old} ({$tax}). Total mapeos disponibles: {$total_mapping_entries}");
+                
+                // Log de diagnóstico para ver qué mapeos están disponibles
+                if ($total_mapping_entries > 0 && $not_found_count_total <= 3) { // Solo mostrar los primeros 3 para evitar spam
+                    $sample_keys = array_slice(array_keys($this->id_mapping), 0, 10);
+                    MD_Import_Force_Logger::log_message("MD Import Force [DEBUG] Muestra de mapeos disponibles: " . implode(', ', $sample_keys));
+                }
+            }
         }
 
-        if (!empty($new_ids)) {
-            $result = wp_set_object_terms($post_id, $new_ids, $tax);
-            if (is_wp_error($result)) MD_Import_Force_Logger::log_message("MD Import Force [ERROR] Post ID {$post_id}: Error asignando términos {$tax}: " . $result->get_error_message());
+        if ($found_count_total > 0) {
+            MD_Import_Force_Logger::log_message("MD Import Force [INFO] Post ID {$post_id}: Mapeados {$found_count_total} términos de {$tax}. Total no encontrados: {$not_found_count_total}. Procediendo a asignar en lotes.");
+            
+            $batch_size = 100;
+            $chunked_new_ids = array_chunk($new_ids_all, $batch_size);
+            $batch_num = 0;
+            $errors_in_batch = false;
+
+            foreach ($chunked_new_ids as $batch_ids) {
+                $batch_num++;
+                MD_Import_Force_Logger::log_message("MD Import Force [INFO] Post ID {$post_id}: Asignando lote {$batch_num} de términos ({$tax}), tamaño: " . count($batch_ids));
+                // El tercer parámetro false indica que no se deben reemplazar todos los términos, sino añadir estos.
+                // Si se quiere reemplazar todos los términos con la primera llamada y luego añadir, se gestionaría de forma diferente
+                // o se llamaría wp_remove_object_terms antes si es necesario limpiar.
+                // Por ahora, asumimos que queremos añadir todos los términos mapeados.
+                $result = wp_set_object_terms($post_id, $batch_ids, $tax, true); // true para append
+                if (is_wp_error($result)) {
+                    MD_Import_Force_Logger::log_message("MD Import Force [ERROR] Post ID {$post_id}: Error asignando lote {$batch_num} de términos {$tax}: " . $result->get_error_message());
+                    $errors_in_batch = true;
+                }
+            }
+            if (!$errors_in_batch) {
+                 MD_Import_Force_Logger::log_message("MD Import Force [SUCCESS] Post ID {$post_id}: Todos los lotes de términos {$tax} asignados.");
+            } else {
+                 MD_Import_Force_Logger::log_message("MD Import Force [WARN] Post ID {$post_id}: Se encontraron errores al asignar algunos lotes de términos {$tax}.");
+            }
+
+        } else if ($not_found_count_total > 0) {
+            MD_Import_Force_Logger::log_message("MD Import Force [WARN] Post ID {$post_id}: No se pudo asignar ningún término de {$tax} ya que no se mapeó ninguno. Términos no encontrados: {$not_found_count_total}");
         }
     }
 

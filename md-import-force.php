@@ -19,9 +19,11 @@ require_once plugin_dir_path(__FILE__) . 'includes/class-md-import-force-skipped
 require_once plugin_dir_path(__FILE__) . 'includes/class-md-import-force-post-importer.php';
 require_once plugin_dir_path(__FILE__) . 'includes/class-md-import-force-taxonomy-importer.php';
 require_once plugin_dir_path(__FILE__) . 'includes/class-md-import-force-media-handler.php';
+require_once plugin_dir_path(__FILE__) . 'includes/class-md-import-force-media-queue-manager.php';
 require_once plugin_dir_path(__FILE__) . 'includes/class-md-import-force-comment-importer.php';
 require_once plugin_dir_path(__FILE__) . 'includes/class-md-import-force-progress-tracker.php';
 require_once plugin_dir_path(__FILE__) . 'includes/class-md-import-force-job-manager.php';
+require_once plugin_dir_path(__FILE__) . 'includes/class-md-import-force-content-updater.php';
 require_once plugin_dir_path(__FILE__) . 'includes/db-schema.php';
 
 // Definir constantes
@@ -52,6 +54,12 @@ class MD_Import_Force {
         // Acción para el cron de importación
         add_action('md_import_force_run_background_import', array('MD_Import_Force', 'execute_background_import'), 10, 2);
 
+        // Hook para el procesamiento de medios
+        add_action('md_import_force_process_media_batch', array('MD_Import_Force_Media_Queue_Manager', 'process_media_batch'), 10, 4);
+
+        // Hook para la actualización de contenido de posts con URLs de medios importados
+        add_action('md_import_force_update_post_content_media_urls', array('MD_Import_Force_Content_Updater', 'process_content_update_batch'), 10, 4);
+
         // Asegurar que la tabla de cola de medios exista (se ejecuta en cada carga, dbDelta es eficiente)
         add_action('plugins_loaded', 'mdif_create_media_queue_table', 5); // Prioridad temprana pero después de cargar clases básicas
 
@@ -62,9 +70,6 @@ class MD_Import_Force {
      * Registrar endpoints de la REST API
      */
     public function register_rest_routes() {
-        // >>> DEBUGGING: Log when this function is called
-        error_log('MD Import Force: register_rest_routes called');
-
         register_rest_route('md-import-force/v1', '/upload', array(
             'methods' => 'POST',
             'callback' => array($this, 'handle_rest_upload'),
@@ -94,7 +99,8 @@ class MD_Import_Force {
             'callback' => array($this, 'handle_rest_read_log'),
             'permission_callback' => function () {
                 return current_user_can('manage_options');
-            }
+            },
+            'args' => array()
         ));
 
         register_rest_route('md-import-force/v1', '/log', array(
@@ -102,7 +108,8 @@ class MD_Import_Force {
             'callback' => array($this, 'handle_rest_clear_log'),
             'permission_callback' => function () {
                 return current_user_can('manage_options');
-            }
+            },
+            'args' => array()
         ));
 
         register_rest_route('md-import-force/v1', '/progress', array(
@@ -121,24 +128,13 @@ class MD_Import_Force {
             }
         ));
 
-        // >>> INICIO: Registrar endpoint para detener importaciones <<<
-        // Modified to use standard format for consistency and clearer debug
         register_rest_route('md-import-force/v1', '/stop-imports', array(
-            'methods' => 'POST',  // Changed from WP_REST_Server::CREATABLE for consistency with other endpoints
+            'methods' => 'POST',
             'callback' => array($this, 'handle_stop_imports_request'),
             'permission_callback' => function () {
                 return current_user_can('manage_options');
             }
         ));
-        error_log('MD Import Force: Registered /stop-imports endpoint');
-        // >>> FIN: Registrar endpoint para detener importaciones <<<
-
-        // >>> DEBUGGING: Log all registered routes
-        if (function_exists('get_option') && get_option('permalink_structure')) { // Only log if pretty permalinks likely enabled
-            $server = rest_get_server();
-            $all_routes = array_keys($server->get_routes());
-            error_log('MD Import Force - Registered REST Routes: ' . print_r($all_routes, true));
-        }
     }
 
     /**
@@ -556,26 +552,40 @@ class MD_Import_Force {
      * Manejador de REST API: Limpiar log
      */
     public function handle_rest_clear_log(WP_REST_Request $request) {
-        $result = MD_Import_Force_Logger::clear_error_log();
+        try {
+            $result = MD_Import_Force_Logger::clear_error_log();
 
-        if (is_wp_error($result)) {
-            return $result;
-        } else {
-            // MD_Import_Force_Logger::clear_error_log() devuelve:
-            // array('success' => true, 'message' => 'Log de errores limpiado con éxito.')
-            // o un WP_Error
-            if (isset($result['success']) && $result['success']) {
-                 return rest_ensure_response(array(
-                    'success' => true,
-                    'message' => isset($result['message']) ? $result['message'] : __('Log limpiado correctamente.', 'md-import-force')
-                ));
+            if (is_wp_error($result)) {
+                if (defined('WP_DEBUG') && WP_DEBUG) {
+                    error_log('MD Import Force: clear_error_log returned WP_Error: ' . $result->get_error_message());
+                }
+                return $result;
             } else {
-                return rest_ensure_response(array(
-                    'success' => false,
-                    'message' => isset($result['message']) ? $result['message'] : __('Error al limpiar el log.', 'md-import-force'),
-                    'data' => $result // Para depuración
-                ));
+                // MD_Import_Force_Logger::clear_error_log() devuelve:
+                // array('success' => true, 'message' => 'Log de errores limpiado con éxito.')
+                // o un WP_Error
+                if (isset($result['success']) && $result['success']) {
+                    return rest_ensure_response(array(
+                        'success' => true,
+                        'message' => isset($result['message']) ? $result['message'] : __('Log limpiado correctamente.', 'md-import-force')
+                    ));
+                } else {
+                    if (defined('WP_DEBUG') && WP_DEBUG) {
+                        error_log('MD Import Force: Log clear failed, result: ' . print_r($result, true));
+                    }
+                    return rest_ensure_response(array(
+                        'success' => false,
+                        'message' => isset($result['message']) ? $result['message'] : __('Error al limpiar el log.', 'md-import-force'),
+                        'data' => $result // Para depuración
+                    ));
+                }
             }
+        } catch (Exception $e) {
+            error_log('MD Import Force: Exception in handle_rest_clear_log: ' . $e->getMessage());
+            return new WP_Error('clear_log_exception', $e->getMessage(), array('status' => 500));
+        } catch (Error $e) {
+            error_log('MD Import Force: Fatal error in handle_rest_clear_log: ' . $e->getMessage());
+            return new WP_Error('clear_log_fatal_error', $e->getMessage(), array('status' => 500));
         }
     }
 
