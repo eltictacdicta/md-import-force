@@ -57,18 +57,19 @@ class MD_Import_Force_Media_Queue_Manager {
      *
      * @param string $import_run_guid GUID de la sesión de importación.
      * @param int $limit Número máximo de items a obtener.
-     * @param int $offset Número de items a saltar (para paginación).
+     * @param int $offset Número de items a saltar (DEPRECATED - ya no se usa).
      * @return array Array de items de la cola.
      */
     public static function get_pending_batch($import_run_guid, $limit = 10, $offset = 0) {
         global $wpdb;
         $table_name = self::get_table_name();
 
+        // Ya no usamos OFFSET porque cuando se marcan items como procesados, 
+        // ya no están 'pending' y el offset se vuelve incorrecto
         $sql = $wpdb->prepare(
-            "SELECT * FROM {$table_name} WHERE import_run_guid = %s AND status = 'pending' ORDER BY id ASC LIMIT %d OFFSET %d",
+            "SELECT * FROM {$table_name} WHERE import_run_guid = %s AND status = 'pending' ORDER BY id ASC LIMIT %d",
             $import_run_guid,
-            $limit,
-            $offset
+            $limit
         );
         return $wpdb->get_results($sql, ARRAY_A);
     }
@@ -257,26 +258,31 @@ class MD_Import_Force_Media_Queue_Manager {
     public static function process_media_batch($import_run_guid, $import_id, $options = [], $batch_offset = 0) {
         $batch_size = apply_filters('md_import_force_media_batch_size', 10); // Aumentado de 5 a 10 para acelerar procesamiento
         
-        MD_Import_Force_Logger::log_message("MD Import Force [MEDIA PROCESSING]: Iniciando procesamiento de lote. GUID: {$import_run_guid}, Offset: {$batch_offset}, Tamaño Lote: {$batch_size}");
+        MD_Import_Force_Logger::log_message("MD Import Force [MEDIA PROCESSING]: Iniciando procesamiento de lote. GUID: {$import_run_guid}, Tamaño Lote: {$batch_size}");
 
-        // Obtener lote de medios pendientes
-        $media_items = self::get_pending_batch($import_run_guid, $batch_size, $batch_offset);
+        // Obtener lote de medios pendientes (siempre desde el principio ya que los procesados no estarán pending)
+        $media_items = self::get_pending_batch($import_run_guid, $batch_size);
         
         if (empty($media_items)) {
             MD_Import_Force_Logger::log_message("MD Import Force [MEDIA PROCESSING]: No hay más medios pendientes. Procesamiento completado para GUID: {$import_run_guid}");
             
-            // Todos los medios han sido procesados. Marcar la importación global como completada.
-            require_once MD_IMPORT_FORCE_PLUGIN_DIR . 'includes/class-md-import-force-progress-tracker.php';
-            MD_Import_Force_Progress_Tracker::update_status(
-                $import_id,
-                'completed',
-                __('Importación completada incluyendo medios.', 'md-import-force')
+            // --- INICIO: Programar la fase de actualización de contenido --- 
+            MD_Import_Force_Logger::log_message("MD Import Force [MEDIA PROCESSING]: Cola de medios vacía. Programando fase de actualización de contenido para GUID: {$import_run_guid}");
+             as_schedule_single_action(
+                time() + 1, // Reducido de 5 a 1 segundo para transición rápida
+                'md_import_force_update_post_content_media_urls',
+                 array(
+                     'import_run_guid' => $import_run_guid,
+                     'import_id' => $import_id,
+                     'options' => $options,
+                     'offset' => 0 // Comenzar desde el primer post
+                 ), 
+                'md-import-force-content-update' // Nuevo grupo
             );
-            
-            // Limpiar la cola de medios para esta importación
-            self::delete_items_for_run($import_run_guid);
-            MD_Import_Force_Logger::log_message("MD Import Force [MEDIA PROCESSING]: Cola de medios limpia para GUID: {$import_run_guid}");
+            // --- FIN: Programar la fase de actualización de contenido --- 
 
+            // NO marcar como completado ni limpiar la cola de medios aquí.
+            // Esto se hará DESPUÉS de la fase de actualización de contenido.
             return;
         }
 
@@ -310,7 +316,7 @@ class MD_Import_Force_Media_Queue_Manager {
             
             // Salir del bucle si se excede el tiempo de ejecución o si hay solicitud de detención global.
             if ($elapsed_time >= $time_limit_for_action || get_option('md_import_force_stop_all_imports_requested', false) || get_transient('md_import_force_stop_request_' . $import_id)) {
-                 MD_Import_Force_Logger::log_message("MD Import Force [MEDIA PROCESSING]: Deteniendo procesamiento de lote por tiempo excedido o solicitud de detención. GUID: {$import_run_guid}, Offset: {$batch_offset}, Procesados en este job: {$processed_count_in_this_batch}");
+                 MD_Import_Force_Logger::log_message("MD Import Force [MEDIA PROCESSING]: Deteniendo procesamiento de lote por tiempo excedido o solicitud de detención. GUID: {$import_run_guid}, Procesados en este job: {$processed_count_in_this_batch}");
                  break; // Salir del foreach para permitir que el scheduler reprograme
             }
 
@@ -416,14 +422,14 @@ class MD_Import_Force_Media_Queue_Manager {
             $memory_usage_ratio = $current_memory_usage / $memory_limit_bytes;
 
              if ($memory_limit_bytes > 0 && $memory_usage_ratio > 0.85 && $processed_count_in_this_batch < count($media_items)) {
-                 MD_Import_Force_Logger::log_message("MD Import Force [MEDIA PROCESSING]: Umbral de memoria (85%) superado (" . round($memory_usage_ratio*100, 2) . "%). Procesados en este job: {$processed_count_in_this_batch}. Saliendo del lote para reprogramar. GUID: {$import_run_guid}, Offset: {$batch_offset}");
+                 MD_Import_Force_Logger::log_message("MD Import Force [MEDIA PROCESSING]: Umbral de memoria (85%) superado (" . round($memory_usage_ratio*100, 2) . "%). Procesados en este job: {$processed_count_in_this_batch}. Saliendo del lote para reprogramar. GUID: {$import_run_guid}");
                  break; // Salir del bucle
              }
 
         }
 
-        // Calcular el próximo offset basado en cuántos ítems *realmente* se procesaron en este job
-        $next_batch_offset = $batch_offset + $processed_count_in_this_batch;
+        // Ya no necesitamos calcular el próximo offset porque siempre empezamos desde el principio
+        // Los items procesados ya no estarán en estado 'pending'
 
         $processed_total_for_run = self::count_total_items_for_run($import_run_guid);
         // Re-contar los pendientes para asegurar precisión después del procesamiento del lote
@@ -434,7 +440,7 @@ class MD_Import_Force_Media_Queue_Manager {
 
         // Verificar si hay más medios pendientes para este import_run_guid
         if ($pending_total_for_run > 0) {
-             MD_Import_Force_Logger::log_message("MD Import Force [MEDIA PROCESSING]: Programando siguiente acción para medios con delay. Pendientes restantes: {$pending_total_for_run}. GUID: {$import_run_guid}");
+             MD_Import_Force_Logger::log_message("MD Import Force [MEDIA PROCESSING]: Programando siguiente acción para medios. Pendientes restantes: {$pending_total_for_run}. GUID: {$import_run_guid}");
              
              // Programar la misma acción para que se ejecute más tarde
              as_schedule_single_action(
@@ -444,7 +450,7 @@ class MD_Import_Force_Media_Queue_Manager {
                      'import_run_guid' => $import_run_guid,
                      'import_id' => $import_id,
                      'options' => $options,
-                     'batch_offset' => $next_batch_offset // Pasar el offset calculado
+                     'batch_offset' => 0 // Siempre desde el principio (ya no usado en get_pending_batch)
                  ), 
                 'md-import-force-media' // Grupo específico
             );

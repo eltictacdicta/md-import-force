@@ -402,13 +402,24 @@ class MD_Import_Force_Post_Importer {
         // --- INICIO: Recopilación de Referencias de Medios (en lugar de procesamiento inmediato) ---
         // Imagen destacada
         if (!empty($item_data['featured_image'])) {
-            $current_post_media_references[] = [
-                // 'import_run_guid' => $this->current_import_run_guid, // Se añadirá en el Handler/JobManager
-                'post_id' => $processed_id,
-                'original_post_id_from_file' => $id, // ID original del post del archivo
-                'media_type' => 'featured_image',
-                'original_url' => $item_data['featured_image']
-            ];
+            $featured_image_url = '';
+            
+            // Manejar tanto string como objeto para featured_image
+            if (is_string($item_data['featured_image'])) {
+                $featured_image_url = $item_data['featured_image'];
+            } elseif (is_array($item_data['featured_image']) && !empty($item_data['featured_image']['url'])) {
+                $featured_image_url = $item_data['featured_image']['url'];
+            }
+            
+            if (!empty($featured_image_url)) {
+                $current_post_media_references[] = [
+                    // 'import_run_guid' => $this->current_import_run_guid, // Se añadirá en el Handler/JobManager
+                    'post_id' => $processed_id,
+                    'original_post_id_from_file' => $id, // ID original del post del archivo
+                    'media_type' => 'featured_image',
+                    'original_url' => $featured_image_url
+                ];
+            }
         }
 
         // Imágenes en contenido
