@@ -279,6 +279,37 @@ class MD_Import_Force_Post_Importer {
     }
 
     /**
+     * Reemplaza las URLs del sitio de origen por las URLs del sitio actual en el contenido
+     */
+    private function replace_content_urls($content) {
+        if (empty($content) || empty($this->source_site_info['site_url'])) {
+            return $content;
+        }
+        
+        $source_url = rtrim($this->source_site_info['site_url'], '/');
+        $target_url = rtrim(home_url(), '/');
+        
+        // Si las URLs son iguales, no hay nada que reemplazar
+        if ($source_url === $target_url) {
+            return $content;
+        }
+        
+        // Reemplazar URLs completas
+        $content = str_replace($source_url, $target_url, $content);
+        
+        // También reemplazar URLs con protocolo diferente (http vs https)
+        if (strpos($source_url, 'https://') === 0) {
+            $source_url_http = str_replace('https://', 'http://', $source_url);
+            $content = str_replace($source_url_http, $target_url, $content);
+        } elseif (strpos($source_url, 'http://') === 0) {
+            $source_url_https = str_replace('http://', 'https://', $source_url);
+            $content = str_replace($source_url_https, $target_url, $content);
+        }
+        
+        return $content;
+    }
+
+    /**
      * Procesa un único post/página.
      * Devuelve un array con el estado y las referencias de medios.
      */
@@ -303,11 +334,19 @@ class MD_Import_Force_Post_Importer {
             return ['status' => 'skipped', 'media_references' => $current_post_media_references];
         }
 
+        // Procesar contenido para reemplazar URLs
+        $post_content = $item_data['post_content'] ?? '';
+        $post_content = $this->replace_content_urls($post_content);
+        
+        // Procesar excerpt para reemplazar URLs también
+        $post_excerpt = $item_data['post_excerpt'] ?? '';
+        $post_excerpt = $this->replace_content_urls($post_excerpt);
+
         // Preparar datos del post
         $item_arr = [
             'post_title' => $title,
-            'post_content' => $item_data['post_content'] ?? '',
-            'post_excerpt' => $item_data['post_excerpt'] ?? '',
+            'post_content' => $post_content,
+            'post_excerpt' => $post_excerpt,
             'post_status' => $item_data['post_status'] ?? 'publish',
             'post_type' => $type,
             'post_name' => $item_data['post_name'] ?? sanitize_title($title),
@@ -331,10 +370,30 @@ class MD_Import_Force_Post_Importer {
                 $item_arr['ID'] = $id;
                 $action = 'update';
             } else {
-                $reason = "Tipo existente '{$existing->post_type}' != Importado '{$type}'";
-                MD_Import_Force_Logger::log_message("MD Import Force [CONFLICT/SKIP] Post ID {$id}: {$reason}.");
-                $this->skipped_items_tracker->add_skipped_item($id, $title, $type, $reason);
-                return ['status' => 'skipped', 'media_references' => $current_post_media_references];
+                // Caso especial: si el post existente es de tipo oembed_cache, lo eliminamos y procedemos con la importación
+                if ($existing->post_type === 'oembed_cache') {
+                    MD_Import_Force_Logger::log_message("MD Import Force [OEMBED_CLEANUP] Post ID {$id}: Eliminando post existente de tipo 'oembed_cache' para permitir importación de '{$type}'.");
+                    
+                    // Eliminar el post oembed_cache existente
+                    $deleted = wp_delete_post($id, true); // true = forzar eliminación permanente
+                    
+                    if ($deleted) {
+                        MD_Import_Force_Logger::log_message("MD Import Force [OEMBED_CLEANUP] Post ID {$id}: Post 'oembed_cache' eliminado exitosamente.");
+                        // Proceder como inserción con ID forzado
+                        $item_arr['import_id'] = $id;
+                        $action = 'insert';
+                    } else {
+                        $reason = "No se pudo eliminar el post existente de tipo 'oembed_cache' con ID {$id}";
+                        MD_Import_Force_Logger::log_message("MD Import Force [ERROR] Post ID {$id}: {$reason}.");
+                        $this->skipped_items_tracker->add_skipped_item($id, $title, $type, $reason);
+                        return ['status' => 'skipped', 'media_references' => $current_post_media_references];
+                    }
+                } else {
+                    $reason = "Tipo existente '{$existing->post_type}' != Importado '{$type}'";
+                    MD_Import_Force_Logger::log_message("MD Import Force [CONFLICT/SKIP] Post ID {$id}: {$reason}.");
+                    $this->skipped_items_tracker->add_skipped_item($id, $title, $type, $reason);
+                    return ['status' => 'skipped', 'media_references' => $current_post_media_references];
+                }
             }
         } else {
             $item_arr['import_id'] = $id;

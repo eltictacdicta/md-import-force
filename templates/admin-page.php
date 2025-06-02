@@ -43,7 +43,7 @@ if (!defined('ABSPATH')) {
                         <p class="description"><?php _e('Activa esta opción para importar archivos de medios, imágenes destacadas y crear attachments en WordPress.', 'md-import-force'); ?></p>
                         
                         <label for="generate_thumbnails" style="margin-top: 10px; display: block;">
-                            <input type="checkbox" id="generate_thumbnails" name="generate_thumbnails" value="1">
+                            <input type="checkbox" id="generate_thumbnails" name="generate_thumbnails" value="1" checked>
                             <?php _e('Generar miniaturas automáticamente', 'md-import-force'); ?>
                         </label>
                         <p class="description"><?php _e('Genera automáticamente miniaturas para las imágenes importadas.', 'md-import-force'); ?></p>

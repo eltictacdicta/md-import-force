@@ -155,6 +155,27 @@ document.addEventListener('DOMContentLoaded', function() {
             content += '<p>URL: ' + escapeHtml(previewData.site_info.site_url) + '</p>';
             content += '<p>Nombre: ' + escapeHtml(previewData.site_info.site_name) + '</p>';
             
+            // Mostrar información del sitio actual
+            if (previewData.current_site_info) {
+                content += '<h4>Información del sitio de destino (actual):</h4>';
+                content += '<p>URL: ' + escapeHtml(previewData.current_site_info.site_url) + '</p>';
+                content += '<p>Nombre: ' + escapeHtml(previewData.current_site_info.site_name) + '</p>';
+            }
+            
+            // Mostrar información de reemplazo de URLs
+            if (previewData.url_replacement_info) {
+                content += '<h4>Reemplazo de URLs:</h4>';
+                if (previewData.url_replacement_info.will_replace) {
+                    content += '<p style="color: blue;">✓ Se reemplazarán las URLs del contenido:</p>';
+                    content += '<p><strong>Desde:</strong> ' + escapeHtml(previewData.url_replacement_info.source_url) + '</p>';
+                    content += '<p><strong>Hacia:</strong> ' + escapeHtml(previewData.url_replacement_info.target_url) + '</p>';
+                } else if (previewData.url_replacement_info.source_url === previewData.url_replacement_info.target_url) {
+                    content += '<p style="color: green;">✓ Las URLs del sitio de origen y destino son iguales, no se requiere reemplazo.</p>';
+                } else {
+                    content += '<p style="color: orange;">⚠ No se detectó URL del sitio de origen, no se realizará reemplazo de URLs.</p>';
+                }
+            }
+            
             // Generar mensaje resumen usando los nuevos datos del backend
             let summaryMessage = '';
             const totalInFile = previewData.total_records_in_file;
@@ -192,20 +213,66 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const optionsWrapper = document.getElementById('md-import-force-options-wrapper');
             const onlyMissingCheckbox = document.getElementById('import_only_missing');
+            const handleAttachmentsCheckbox = document.getElementById('handle_attachments');
+            const generateThumbnailsCheckbox = document.getElementById('generate_thumbnails');
+            const forceIdsCheckbox = document.getElementById('force_ids');
+            const forceAuthorCheckbox = document.getElementById('force_author');
 
-            if (optionsWrapper && onlyMissingCheckbox) {
+            if (optionsWrapper) {
                 if (previewData.total_missing_in_file > 0) {
                     // Mostrar opciones cuando hay posts para importar
                     optionsWrapper.style.display = 'block';
-                    // Solo marcar "import_only_missing" si hay posts existentes y faltantes
-                    if (previewData.total_existing_in_file > 0 && previewData.total_missing_in_file > 0) {
-                        onlyMissingCheckbox.checked = true;
+                    
+                    // Configurar opciones según si existen posts o no
+                    if (previewData.total_existing_in_file === 0) {
+                        // No hay posts existentes - importación nueva
+                        // Marcar: handle_attachments, generate_thumbnails, force_ids
+                        // Ocultar: import_only_missing
+                        if (handleAttachmentsCheckbox) handleAttachmentsCheckbox.checked = true;
+                        if (generateThumbnailsCheckbox) generateThumbnailsCheckbox.checked = true;
+                        if (forceIdsCheckbox) forceIdsCheckbox.checked = true;
+                        if (forceAuthorCheckbox) forceAuthorCheckbox.checked = false;
+                        
+                        // Ocultar la opción import_only_missing
+                        if (onlyMissingCheckbox) {
+                            onlyMissingCheckbox.checked = false;
+                            const onlyMissingLabel = onlyMissingCheckbox.closest('label');
+                            if (onlyMissingLabel) {
+                                onlyMissingLabel.style.display = 'none';
+                                // También ocultar la descripción siguiente si existe
+                                const nextP = onlyMissingLabel.nextElementSibling;
+                                if (nextP && nextP.tagName === 'P' && nextP.classList.contains('description')) {
+                                    nextP.style.display = 'none';
+                                }
+                            }
+                        }
                     } else {
-                        onlyMissingCheckbox.checked = false;
+                        // Hay posts existentes - importación parcial
+                        // Marcar: handle_attachments, generate_thumbnails, force_ids, import_only_missing
+                        // Mostrar: import_only_missing (marcada por defecto)
+                        if (handleAttachmentsCheckbox) handleAttachmentsCheckbox.checked = true;
+                        if (generateThumbnailsCheckbox) generateThumbnailsCheckbox.checked = true;
+                        if (forceIdsCheckbox) forceIdsCheckbox.checked = true;
+                        if (forceAuthorCheckbox) forceAuthorCheckbox.checked = false;
+                        
+                        // Mostrar y marcar import_only_missing por defecto
+                        if (onlyMissingCheckbox) {
+                            onlyMissingCheckbox.checked = true; // Marcada por defecto en importación parcial
+                            const onlyMissingLabel = onlyMissingCheckbox.closest('label');
+                            if (onlyMissingLabel) {
+                                onlyMissingLabel.style.display = 'block'; // Mostrar la opción
+                                // También mostrar la descripción siguiente si existe
+                                const nextP = onlyMissingLabel.nextElementSibling;
+                                if (nextP && nextP.tagName === 'P' && nextP.classList.contains('description')) {
+                                    nextP.style.display = 'block';
+                                }
+                            }
+                        }
                     }
                 } else {
+                    // No hay posts para importar
                     optionsWrapper.style.display = 'none';
-                    onlyMissingCheckbox.checked = false;
+                    if (onlyMissingCheckbox) onlyMissingCheckbox.checked = false;
                 }
             }
 

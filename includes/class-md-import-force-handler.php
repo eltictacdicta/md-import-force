@@ -133,6 +133,20 @@ class MD_Import_Force_Handler {
             $posts_data = $data_to_preview['posts'];
             MD_Import_Force_Logger::log_message("MD Import Force [DEBUG PREVIEW]: Datos de sitio y posts extraídos.");
 
+            // Detectar URL base del proyecto actual
+            $current_site_url = home_url();
+            $current_site_name = get_bloginfo('name');
+            
+            // Obtener URL del sitio de origen
+            $source_site_url = isset($source_site_info['site_url']) ? $source_site_info['site_url'] : '';
+            
+            // Información de reemplazo de URLs
+            $url_replacement_info = array(
+                'source_url' => $source_site_url,
+                'target_url' => $current_site_url,
+                'will_replace' => !empty($source_site_url) && $source_site_url !== $current_site_url
+            );
+
             $all_posts_in_file = $posts_data;
             $missing_posts = [];
             $existing_posts_in_file_count = 0;
@@ -170,6 +184,11 @@ class MD_Import_Force_Handler {
             return array(
                 'success' => true,
                 'site_info' => $source_site_info,
+                'current_site_info' => array(
+                    'site_url' => $current_site_url,
+                    'site_name' => $current_site_name
+                ),
+                'url_replacement_info' => $url_replacement_info,
                 'total_records_in_file' => count($all_posts_in_file), // Total original en el archivo
                 'total_missing_in_file' => $total_missing_in_file, // Total de los que realmente faltan
                 'total_existing_in_file' => $existing_posts_in_file_count, // Total de los que ya existen en el archivo

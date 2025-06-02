@@ -107,9 +107,66 @@ class MD_Import_Force_Content_Updater {
                                 MD_Import_Force_Logger::log_message("MD Import Force [CONTENT UPDATE WARNING]: Could not get new URL for attachment ID {$attachment_id} (original URL: {$original_url}) for post ID {$post_id}");
                             }
                         } else {
-                            MD_Import_Force_Logger::log_message("MD Import Force [CONTENT UPDATE WARNING]: Could not find imported attachment for original URL {$original_url} for post ID {$post_id}");
-                            // Opcional: Marcar este media item como fallido en la cola de medios si no se encontró el adjunto?
-                            // Esto requeriría buscar el item en la cola de medios por original_url y import_run_guid
+                            // Si no se encuentra por URL exacta, intentar buscar por nombre de archivo
+                            $filename = basename(parse_url($original_url, PHP_URL_PATH));
+                            if (!empty($filename)) {
+                                MD_Import_Force_Logger::log_message("MD Import Force [CONTENT UPDATE]: Trying fallback search by filename '{$filename}' for original URL {$original_url} for post ID {$post_id}");
+                                
+                                // Buscar por nombre de archivo en el título del post o en la URL
+                                $filename_without_ext = pathinfo($filename, PATHINFO_FILENAME);
+                                $args_fallback = array(
+                                    'post_type'  => 'attachment',
+                                    'post_status' => 'inherit',
+                                    'posts_per_page' => -1,
+                                    'fields' => 'ids',
+                                    'meta_query' => array(
+                                        array(
+                                            'key' => '_source_url',
+                                            'value' => $filename,
+                                            'compare' => 'LIKE'
+                                        )
+                                    )
+                                );
+                                $fallback_attachments = get_posts($args_fallback);
+                                
+                                if (!empty($fallback_attachments)) {
+                                    // Si encontramos múltiples, tomar el primero
+                                    $attachment_id = $fallback_attachments[0];
+                                    $new_media_url = wp_get_attachment_url($attachment_id);
+                                    $source_url = get_post_meta($attachment_id, '_source_url', true);
+                                    
+                                    if ($new_media_url) {
+                                        $replacements[$original_url] = $new_media_url;
+                                        $updated = true;
+                                        MD_Import_Force_Logger::log_message("MD Import Force [CONTENT UPDATE]: Found fallback replacement by filename for URL {$original_url} -> {$new_media_url} (source: {$source_url}) for post ID {$post_id}");
+                                    }
+                                } else {
+                                    // Último intento: buscar por título del post (nombre del archivo sin extensión)
+                                    $args_title = array(
+                                        'post_type'  => 'attachment',
+                                        'post_status' => 'inherit',
+                                        'posts_per_page' => 1,
+                                        'fields' => 'ids',
+                                        'post_title' => $filename_without_ext
+                                    );
+                                    $title_attachments = get_posts($args_title);
+                                    
+                                    if (!empty($title_attachments)) {
+                                        $attachment_id = $title_attachments[0];
+                                        $new_media_url = wp_get_attachment_url($attachment_id);
+                                        
+                                        if ($new_media_url) {
+                                            $replacements[$original_url] = $new_media_url;
+                                            $updated = true;
+                                            MD_Import_Force_Logger::log_message("MD Import Force [CONTENT UPDATE]: Found replacement by post title for URL {$original_url} -> {$new_media_url} for post ID {$post_id}");
+                                        }
+                                    } else {
+                                        MD_Import_Force_Logger::log_message("MD Import Force [CONTENT UPDATE WARNING]: Could not find imported attachment for original URL {$original_url} (filename: {$filename}) for post ID {$post_id}");
+                                    }
+                                }
+                            } else {
+                                MD_Import_Force_Logger::log_message("MD Import Force [CONTENT UPDATE WARNING]: Could not extract filename from URL {$original_url} for post ID {$post_id}");
+                            }
                         }
                     }
 
